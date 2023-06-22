@@ -1,75 +1,81 @@
 #![no_std]
 #![no_main]
 
-use embedded_graphics::{
-    image::Image,
-    mono_font::{ascii::FONT_6X12, MonoTextStyle},
-    pixelcolor::Rgb888,
-    prelude::{Point, RgbColor, Size},
-    primitives::{Circle, Primitive, PrimitiveStyleBuilder, Rectangle, Triangle},
-    text::Text,
-    Drawable,
-};
-use psp::embedded_graphics::Framebuffer;
-use tinybmp::Bmp;
+extern crate alloc;
 
-psp::module!("sample_module", 1, 1);
+use psp::sys;
 
+use drogue_tls::blocking::*;
+use drogue_network::addr::HostSocketAddr;
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::SeedableRng;
+
+psp::module!("tls-test", 1, 1);
+
+mod net;
+
+#[no_mangle]
 fn psp_main() {
     psp::enable_home_button();
-    let mut disp = Framebuffer::new();
+    unsafe {
+        load_modules();
+        init();
+        psp::sys::sceNetApctlConnect(1);
+        loop {
+            let mut state: psp::sys::ApctlState = core::mem::zeroed();
+            psp::sys::sceNetApctlGetState(&mut state);
+            if let psp::sys::ApctlState::GotIp = state {
+                break;
+            }
+            psp::sys::sceKernelDelayThread(50_000);
+        }
+    }
+    
+    let socket = net::Socket::open().expect("failed to open socket");
+    socket.connect(HostSocketAddr::from("93.184.216.34", 443).expect("failed to create address")).expect("failed to connect socket");
+    let mut seed: u64 = 0;
+    unsafe { 
+        sys::sceRtcGetCurrentTick(&mut seed as *mut u64);
+    }
+    let rng = ChaCha20Rng::seed_from_u64(seed);
 
-    let style = PrimitiveStyleBuilder::new()
-        .fill_color(Rgb888::BLACK)
-        .build();
-    let black_backdrop = Rectangle::new(Point::new(0, 0), Size::new(160, 80)).into_styled(style);
-    black_backdrop.draw(&mut disp).unwrap();
+    let mut record_buffer = [0; 16384];
+    let tls_context = TlsContext::new(rng, &mut record_buffer).with_server_name("example.com");
+    let mut tls: TlsConnection<ChaCha20Rng, net::Socket, Aes128GcmSha256> =
+        TlsConnection::new(tls_context, socket);
 
-    // draw ferris
-    let bmp = Bmp::from_slice(include_bytes!("../assets/ferris.bmp")).unwrap();
-    let image = Image::new(&bmp, Point::zero());
-    image.draw(&mut disp).unwrap();
+    tls.open().expect("error establishing TLS connection");
 
-    Triangle::new(
-        Point::new(8, 66 + 16),
-        Point::new(8 + 16, 66 + 16),
-        Point::new(8 + 8, 66),
-    )
-    .into_styled(
-        PrimitiveStyleBuilder::new()
-            .stroke_color(Rgb888::RED)
-            .stroke_width(1)
-            .build(),
-    )
-    .draw(&mut disp)
-    .unwrap();
+    tls.write(b"GET / HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: A fucking PSP!\r\n\r\n").expect("error writing data");
 
-    Rectangle::new(Point::new(36, 66), Size::new(16, 16))
-        .into_styled(
-            PrimitiveStyleBuilder::new()
-                .stroke_color(Rgb888::GREEN)
-                .stroke_width(1)
-                .build(),
-        )
-        .draw(&mut disp)
-        .unwrap();
 
-    Circle::new(Point::new(72, 66 + 8), 8)
-        .into_styled(
-            PrimitiveStyleBuilder::new()
-                .stroke_color(Rgb888::BLUE)
-                .stroke_width(1)
-                .build(),
-        )
-        .draw(&mut disp)
-        .unwrap();
+    let mut rx_buf = [0; 4096];
+    let sz = tls.read(&mut rx_buf).expect("error reading data");
+    unsafe {
+        let mut text = alloc::string::String::from_utf8_unchecked(rx_buf.to_vec());
+        text = text.replace("\r","");
+        text = text.replace("\0","");
+        psp::dprintln!("Read {} bytes: {}", sz, text);
+    }
 
-    let rust = Rgb888::new(0xff, 0x07, 0x00);
-    Text::new(
-        "Hello Rust!",
-        Point::new(0, 86),
-        MonoTextStyle::new(&FONT_6X12, rust),
-    )
-    .draw(&mut disp)
-    .unwrap();
+    let mut rx_buf = [0; 4096];
+    let sz = tls.read(&mut rx_buf).expect("error reading data");
+    unsafe {
+        let mut text = alloc::string::String::from_utf8_unchecked(rx_buf.to_vec());
+        text = text.replace("\r","");
+        text = text.replace("\0","");
+        psp::dprintln!("Read {} bytes: {}", sz, text);
+    }
+}
+
+unsafe fn load_modules() {
+    psp::sys::sceUtilityLoadNetModule(psp::sys::NetModule::NetCommon);
+    psp::sys::sceUtilityLoadNetModule(psp::sys::NetModule::NetInet);
+}
+
+unsafe fn init() {
+    psp::sys::sceNetInit(0x20000, 0x20, 0x1000, 0x20, 0x1000);
+    psp::sys::sceNetInetInit();
+    psp::sys::sceNetResolverInit();
+    psp::sys::sceNetApctlInit(0x1600, 42);
 }
