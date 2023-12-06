@@ -1,28 +1,39 @@
 #![no_std]
 #![no_main]
+#![feature(c_void_variant)]
 
 extern crate alloc;
 
-use psp::sys::{sceUtilityOskInitStart, SceUtilityOskParams};
-use psp::{dprintln, sys};
+use alloc::borrow::ToOwned;
+use osk::{read_from_osk, start_osk};
+use psp::sys::{
+    self, SceUtilityOskData, SceUtilityOskInputLanguage, SceUtilityOskInputType,
+    SceUtilityOskParams,
+};
 
 use drogue_network::addr::HostSocketAddr;
 use drogue_tls::blocking::*;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
+use crate::osk::get_osk_data;
+
 psp::module!("tls-test", 1, 1);
 
 mod net;
+mod osk;
 
 fn select_netconfig() -> i32 {
     unsafe { psp::sys::sceUtilityCheckNetParam(1) }
 }
 
+const CHAT_MAX_LENGTH: u16 = 32;
+const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
+
 #[no_mangle]
 fn psp_main() {
     psp::enable_home_button();
-    unsafe {
+    /*unsafe {
         load_modules();
         init();
 
@@ -47,23 +58,22 @@ fn psp_main() {
             }
             psp::sys::sceKernelDelayThread(500_000);
         }
-    }
+    }*/
 
-    
+    let mut out_text = [0u16; CHAT_MAX_LENGTH_USIZE];
+    let mut description = "ask GPT".to_owned();
+    let max_text_length = CHAT_MAX_LENGTH;
 
-    let mut params = SceUtilityOskParams {
-        base: todo!(),
-        datacount: todo!(),
-        data: todo!(),
-        state: todo!(),
-        unk_60: todo!(),
-    };
+    let mut osk_data = get_osk_data(&mut description, max_text_length, &mut out_text);
 
-    let err = unsafe { sceUtilityOskInitStart(&mut params) } < 0;
-    if err {
-        psp::dprintln!("Error initializing OSK");
-    }
+    let params = &mut osk::default_utility_osk_params(&mut osk_data);
 
+    start_osk(params).expect("failed to start osk");
+
+    let read_text = read_from_osk(params).unwrap_or_default();
+    psp::dprintln!("read text: '{:?}'", read_text);
+
+    /*
     let socket = net::Socket::open().expect("failed to open socket");
     socket
         .connect(HostSocketAddr::from("93.184.216.34", 443).expect("failed to create address"))
@@ -100,7 +110,7 @@ fn psp_main() {
         text = text.replace("\r", "");
         text = text.replace("\0", "");
         psp::dprintln!("Read {} bytes: {}", sz, text);
-    }
+    }*/
 }
 
 unsafe fn load_modules() {
