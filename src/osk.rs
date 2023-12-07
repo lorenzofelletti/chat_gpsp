@@ -161,6 +161,8 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
 
             sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
 
+            sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+
             osk_state.set(sceUtilityOskGetStatus());
 
             match osk_state.get() {
@@ -171,6 +173,7 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
                 SceUtilityOskState::Quit => {
                     sceUtilityOskShutdownStart();
                 }
+                // non la metto mai a visible dio caro!!!
                 _ => {}
             }
 
