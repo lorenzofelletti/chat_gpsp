@@ -4,10 +4,11 @@ use alloc::{string::String, vec, vec::Vec};
 use psp::{
     dprint,
     sys::{
-        self, sceDisplayWaitVblankStart, sceGuClear, sceGuFinish, sceGuStart, sceGuSwapBuffers,
-        sceGuSync, sceUtilityGetSystemParamInt, sceUtilityOskGetStatus, sceUtilityOskInitStart,
-        sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer, GuSyncMode,
-        SceUtilityOskData, SceUtilityOskInputLanguage, SceUtilityOskInputType, SceUtilityOskParams,
+        self, sceDisplayWaitVblankStart, sceGuClear, sceGuClearColor, sceGuClearDepth, sceGuFinish,
+        sceGuStart, sceGuSwapBuffers, sceGuSync, sceKernelDelayThread, sceUtilityGetSystemParamInt,
+        sceUtilityOskGetStatus, sceUtilityOskInitStart, sceUtilityOskShutdownStart,
+        sceUtilityOskUpdate, ClearBuffer, GuSyncMode, SceUtilityOskData,
+        SceUtilityOskInputLanguage, SceUtilityOskInputType, SceUtilityOskParams,
         SceUtilityOskState, UtilityDialogCommon,
     },
 };
@@ -19,27 +20,6 @@ fn mut_ptr_u16_to_vec_u16(ptr: *mut u16, len: usize) -> Vec<u16> {
         *c = unsafe { ptr.add(i) } as u16;
     }
     vec
-}
-
-pub fn initialize_osk_data_old(
-    osk_data: &mut SceUtilityOskData,
-    description: &mut str,
-    max_text_length: u16,
-    out_text: &mut [u16],
-) {
-    osk_data.language = SceUtilityOskInputLanguage::English;
-    osk_data.desc = description.as_mut_ptr() as *mut u16;
-
-    osk_data.lines = 1;
-    osk_data.outtextlength = max_text_length.into();
-    osk_data.outtextlimit = max_text_length.into();
-    osk_data.outtext = out_text.as_mut_ptr();
-
-    // unknown, pass 0
-    osk_data.unk_00 = 0;
-    osk_data.unk_04 = 0;
-    osk_data.unk_12 = 0;
-    osk_data.unk_24 = 0;
 }
 
 pub fn get_osk_data(
@@ -55,8 +35,8 @@ pub fn get_osk_data(
         unk_12: 0,
         inputtype: SceUtilityOskInputType::All,
         lines: 1,
-        unk_24: 0,
-        desc: description.as_mut_ptr() as *mut u16,
+        unk_24: 1,
+        desc: [].as_mut_ptr(), // description.as_mut_ptr() as *mut u16,
         intext: in_text.as_mut_ptr(),
         outtextlength: max_text_length.into(),
         outtext: out_text.as_mut_ptr(),
@@ -81,7 +61,7 @@ pub fn default_utility_osk_params(data: &mut SceUtilityOskData) -> SceUtilityOsk
         },
         datacount: 1,
         data: data,
-        state: sys::SceUtilityOskState::None,
+        state: sys::SceUtilityOskState::Visible, //None,
         unk_60: 0,
     }
 }
@@ -151,19 +131,22 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
 
     let mut osk_state = OskState::default();
 
+    let list = vec![0u8, 16].as_mut_ptr() as *mut c_void;
     while !done {
         unsafe {
             // list: 16 bytes aligned
-            let list = vec![0u8, 16].as_mut_ptr() as *mut c_void;
             sceGuStart(sys::GuContextType::Direct, list);
-            sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
-            sceGuFinish();
+            sceGuClearColor(0);
+            sceGuClearDepth(0);
 
+            sceGuFinish();
             sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
 
             sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
 
             osk_state.set(sceUtilityOskGetStatus());
+
+            psp::dprintln!("osk state: {:?}", osk_state.get());
 
             match osk_state.get() {
                 SceUtilityOskState::None => done = true,
@@ -173,7 +156,6 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
                 SceUtilityOskState::Quit => {
                     sceUtilityOskShutdownStart();
                 }
-                // non la metto mai a visible dio caro!!!
                 _ => {}
             }
 
