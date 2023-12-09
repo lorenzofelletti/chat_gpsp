@@ -6,15 +6,15 @@ use psp::{
     dprint,
     sys::{
         self, sceDisplayWaitVblankStart, sceGuClear, sceGuClearColor, sceGuClearDepth,
-        sceGuDepthBuffer, sceGuDepthFunc, sceGuDepthRange, sceGuDispBuffer, sceGuDisplay,
-        sceGuDrawBuffer, sceGuEnable, sceGuFinish, sceGuFrontFace, sceGuInit, sceGuOffset,
-        sceGuScissor, sceGuShadeModel, sceGuStart, sceGuSwapBuffers, sceGuSync, sceGuTerm,
-        sceGuViewport, sceKernelDelayThread, sceUtilityGetSystemParamInt, sceUtilityOskGetStatus,
-        sceUtilityOskInitStart, sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer,
-        DisplayPixelFormat, GuState, GuSyncMode, LightComponent, SceUtilityOskData,
-        SceUtilityOskInputLanguage, SceUtilityOskInputType, SceUtilityOskParams,
-        SceUtilityOskState, TexturePixelFormat, ThreadAttributes, UtilityDialogCommon,
-        UtilityMsgDialogParams,
+        sceGuDebugPrint, sceGuDepthBuffer, sceGuDepthFunc, sceGuDepthRange, sceGuDispBuffer,
+        sceGuDisplay, sceGuDrawBuffer, sceGuEnable, sceGuFinish, sceGuFrontFace, sceGuInit,
+        sceGuOffset, sceGuScissor, sceGuShadeModel, sceGuStart, sceGuSwapBuffers, sceGuSync,
+        sceGuTerm, sceGuViewport, sceKernelDelayThread, sceKernelExitGame,
+        sceUtilityGetSystemParamInt, sceUtilityOskGetStatus, sceUtilityOskInitStart,
+        sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer, DisplayPixelFormat, GuState,
+        GuSyncMode, LightComponent, SceUtilityOskData, SceUtilityOskInputLanguage,
+        SceUtilityOskInputType, SceUtilityOskParams, SceUtilityOskState, TexturePixelFormat,
+        ThreadAttributes, UtilityDialogCommon, UtilityMsgDialogParams,
     },
     vram_alloc::get_vram_allocator,
 };
@@ -122,11 +122,12 @@ pub fn main_fn() {
             .alloc_texture_pixels(BUF_WIDTH_U32, SCR_HEIGHT_U32, TexturePixelFormat::Psm8888)
             .as_mut_ptr_from_zero();
 
-        sys::sceGuInit();
-        sys::sceGuStart(
+        //sys::sceGuInit();
+        /*sys::sceGuStart(
             sys::GuContextType::Direct,
             &mut LIST as *mut _ as *mut c_void,
-        );
+        );*/
+        sceGuDebugPrint(100, 100, 0xff0000ff, read_text.as_bytes().as_ptr());
         sys::sceGuDrawBuffer(DisplayPixelFormat::Psm8888, fbp0 as _, BUF_WIDTH as i32);
         sys::sceGuDebugPrint(100, 100, 0xff0000ff, b"Hello World\0" as *const u8);
         sys::sceGuDebugFlush();
@@ -138,7 +139,9 @@ pub fn main_fn() {
 
         psp::dprintln!("read text: '{:?}'", read_text);
         sceGuTerm();
-    };
+
+        sceKernelExitGame();
+    }
 }
 
 // --- END FROM SAMPLE ---
