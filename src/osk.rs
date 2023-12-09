@@ -1,17 +1,187 @@
-use core::{ffi::c_void, mem::size_of};
+use core::{ffi::c_void, mem::size_of, sync::atomic::AtomicBool};
 
-use alloc::{string::String, vec, vec::Vec};
+use alloc::{borrow::ToOwned, string::String, vec, vec::Vec};
+use lazy_static::lazy_static;
 use psp::{
     dprint,
     sys::{
-        self, sceDisplayWaitVblankStart, sceGuClear, sceGuClearColor, sceGuClearDepth, sceGuFinish,
-        sceGuStart, sceGuSwapBuffers, sceGuSync, sceKernelDelayThread, sceUtilityGetSystemParamInt,
-        sceUtilityOskGetStatus, sceUtilityOskInitStart, sceUtilityOskShutdownStart,
-        sceUtilityOskUpdate, ClearBuffer, GuSyncMode, SceUtilityOskData,
+        self, sceDisplayWaitVblankStart, sceGuClear, sceGuClearColor, sceGuClearDepth,
+        sceGuDepthBuffer, sceGuDepthFunc, sceGuDepthRange, sceGuDispBuffer, sceGuDisplay,
+        sceGuDrawBuffer, sceGuEnable, sceGuFinish, sceGuFrontFace, sceGuInit, sceGuOffset,
+        sceGuScissor, sceGuShadeModel, sceGuStart, sceGuSwapBuffers, sceGuSync, sceGuTerm,
+        sceGuViewport, sceKernelDelayThread, sceUtilityGetSystemParamInt, sceUtilityOskGetStatus,
+        sceUtilityOskInitStart, sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer,
+        DisplayPixelFormat, GuState, GuSyncMode, LightComponent, SceUtilityOskData,
         SceUtilityOskInputLanguage, SceUtilityOskInputType, SceUtilityOskParams,
-        SceUtilityOskState, UtilityDialogCommon,
+        SceUtilityOskState, TexturePixelFormat, ThreadAttributes, UtilityDialogCommon,
+        UtilityMsgDialogParams,
     },
+    vram_alloc::get_vram_allocator,
 };
+
+static mut LIST: psp::Align16<[u32; 262144]> = psp::Align16([0; 262144]);
+const SCR_WIDTH: i32 = 480;
+const SCR_HEIGHT: i32 = 272;
+const BUF_WIDTH: i32 = 512;
+const SCR_WIDTH_U32: u32 = SCR_WIDTH as u32;
+const SCR_HEIGHT_U32: u32 = SCR_HEIGHT as u32;
+const BUF_WIDTH_U32: u32 = BUF_WIDTH as u32;
+
+const CHAT_MAX_LENGTH: u16 = 32;
+const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
+
+// --- START FROM SAMPLE ---
+lazy_static! {
+    static ref DONE: AtomicBool = AtomicBool::new(false);
+}
+
+extern "C" fn exit_callback(_arg1: i32, _arg2: i32, _common: *mut c_void) -> i32 {
+    DONE.store(true, core::sync::atomic::Ordering::SeqCst);
+    0
+}
+
+extern "C" fn callback_thread(_args: usize, _argp: *mut c_void) -> i32 {
+    let cbid =
+        unsafe { sys::sceKernelCreateCallback([].as_ptr(), exit_callback, 0 as *mut c_void) };
+    unsafe { sys::sceKernelRegisterExitCallback(cbid) };
+    unsafe { sys::sceKernelSleepThreadCB() };
+    0
+}
+
+fn setup_callbacks() -> i32 {
+    let thid = unsafe {
+        sys::sceKernelCreateThread(
+            b"update_thread\0".as_ptr() as *const _,
+            callback_thread,
+            0x11,
+            0xFA0,
+            ThreadAttributes::USER,
+            core::ptr::null_mut(),
+        )
+    };
+    if thid.0 >= 0 {
+        unsafe { sys::sceKernelStartThread(thid, 0, core::ptr::null_mut()) };
+    }
+    thid.0
+}
+
+pub fn main_fn() {
+    setup_callbacks();
+
+    unsafe {
+        sceGuInit();
+        sceGuStart(
+            sys::GuContextType::Direct,
+            &mut LIST as *mut _ as *mut c_void,
+        );
+        sceGuDrawBuffer(
+            sys::DisplayPixelFormat::Psm8888,
+            0 as *mut c_void,
+            BUF_WIDTH,
+        );
+        sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
+        sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
+        sceGuOffset(
+            2048 - (SCR_WIDTH as u32 / 2),
+            2048 - (SCR_HEIGHT as u32 / 2),
+        );
+        sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
+        sceGuDepthRange(0xc350, 0x2710);
+        sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        sceGuEnable(GuState::ScissorTest);
+        sceGuDepthFunc(sys::DepthFunc::GreaterOrEqual);
+        sceGuEnable(GuState::DepthTest);
+        sceGuFrontFace(sys::FrontFaceDirection::Clockwise);
+        sceGuShadeModel(sys::ShadingModel::Flat);
+        sceGuEnable(GuState::CullFace);
+        sceGuEnable(GuState::Texture2D);
+        sceGuEnable(GuState::ClipPlanes);
+        sceGuFinish();
+        sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+        sceDisplayWaitVblankStart();
+        sceGuDisplay(true);
+
+        let mut out_text = [0u16; CHAT_MAX_LENGTH_USIZE];
+        let mut description = "ask GPT".to_owned();
+        let max_text_length = CHAT_MAX_LENGTH;
+
+        let mut osk_data = get_osk_data(&mut description, max_text_length, &mut out_text);
+
+        let params = &mut default_utility_osk_params(&mut osk_data);
+
+        start_osk(params).expect("failed to start osk");
+
+        let read_text = read_from_osk(params).unwrap_or_default();
+
+        while !DONE.load(core::sync::atomic::Ordering::SeqCst) {
+            sceKernelDelayThread(1_000);
+        }
+
+        let allocator = get_vram_allocator().unwrap();
+        let fbp0 = allocator
+            .alloc_texture_pixels(BUF_WIDTH_U32, SCR_HEIGHT_U32, TexturePixelFormat::Psm8888)
+            .as_mut_ptr_from_zero();
+
+        sys::sceGuInit();
+        sys::sceGuStart(
+            sys::GuContextType::Direct,
+            &mut LIST as *mut _ as *mut c_void,
+        );
+        sys::sceGuDrawBuffer(DisplayPixelFormat::Psm8888, fbp0 as _, BUF_WIDTH as i32);
+        sys::sceGuDebugPrint(100, 100, 0xff0000ff, b"Hello World\0" as *const u8);
+        sys::sceGuDebugFlush();
+
+        sys::sceGuFinish();
+        sys::sceGuSync(sys::GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+        sys::sceDisplayWaitVblankStart();
+        sys::sceGuDisplay(true);
+
+        psp::dprintln!("read text: '{:?}'", read_text);
+        sceGuTerm();
+    };
+}
+
+// --- END FROM SAMPLE ---
+
+unsafe fn unsafe_setup_gu() {
+    sys::sceGuInit();
+    sys::sceGuStart(
+        sys::GuContextType::Direct,
+        &mut LIST as *mut _ as *mut c_void,
+    );
+    sys::sceGuDrawBuffer(
+        sys::DisplayPixelFormat::Psm8888,
+        core::ptr::null_mut(),
+        BUF_WIDTH,
+    );
+    sys::sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
+    sys::sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
+    sys::sceGuOffset(
+        2048 - (SCR_WIDTH as u32 / 2),
+        2048 - (SCR_HEIGHT as u32 / 2),
+    );
+    sys::sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
+    sys::sceGuDepthRange(0xc350, 0x2710);
+    sys::sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    sys::sceGuEnable(sys::GuState::ScissorTest);
+    sys::sceGuDepthFunc(sys::DepthFunc::GreaterOrEqual);
+    sys::sceGuEnable(sys::GuState::DepthTest);
+    sys::sceGuFrontFace(sys::FrontFaceDirection::Clockwise);
+    sys::sceGuShadeModel(sys::ShadingModel::Smooth);
+    sys::sceGuEnable(sys::GuState::CullFace);
+    sys::sceGuEnable(sys::GuState::ClipPlanes);
+    sys::sceGuFinish();
+    sys::sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+
+    sys::sceDisplayWaitVblankStart();
+    sys::sceGuDisplay(true);
+}
+
+pub fn setup_gu() {
+    unsafe {
+        unsafe_setup_gu();
+    }
+}
 
 /// Convert a mutable pointer to a u16 to a Vec<u16>.
 fn mut_ptr_u16_to_vec_u16(ptr: *mut u16, len: usize) -> Vec<u16> {
@@ -27,6 +197,8 @@ pub fn get_osk_data(
     max_text_length: u16,
     out_text: &mut [u16],
 ) -> SceUtilityOskData {
+    let mut msg: [u8; 512] = [0u8; 512];
+    msg[..description.len()].copy_from_slice(description.as_bytes());
     let mut in_text = [0u16; 0];
     SceUtilityOskData {
         unk_00: 0,
@@ -52,12 +224,12 @@ pub fn default_utility_osk_params(data: &mut SceUtilityOskData) -> SceUtilityOsk
             size: size_of::<SceUtilityOskParams>() as u32,
             language: sys::SystemParamLanguage::English,
             button_accept: sys::UtilityDialogButtonAccept::Cross,
-            graphics_thread: 17,
-            access_thread: 19,
-            font_thread: 18,
-            sound_thread: 16,
-            result: i32::default(),
-            reserved: [0, 0, 0, 0],
+            graphics_thread: 0x11, //17,
+            access_thread: 0x13,   //19,
+            font_thread: 0x12,     //18,
+            sound_thread: 0x10,    //16,
+            result: 0,             //i32::default(),
+            reserved: [0i32; 4],
         },
         datacount: 1,
         data: data,
@@ -67,6 +239,7 @@ pub fn default_utility_osk_params(data: &mut SceUtilityOskData) -> SceUtilityOsk
 }
 
 pub fn start_osk(params: &mut SceUtilityOskParams) -> Result<(), &str> {
+    setup_gu();
     unsafe {
         if sceUtilityOskInitStart(params as *mut SceUtilityOskParams) == 0 {
             Ok(())
@@ -131,11 +304,14 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
 
     let mut osk_state = OskState::default();
 
-    let list = vec![0u8, 16].as_mut_ptr() as *mut c_void;
+    //setup_gu();
+
     while !done {
         unsafe {
-            // list: 16 bytes aligned
-            sceGuStart(sys::GuContextType::Direct, list);
+            sceGuStart(
+                sys::GuContextType::Direct,
+                &mut LIST as *mut _ as *mut c_void, // from rust-psp msgdialog example
+            );
             sceGuClearColor(0);
             sceGuClearDepth(0);
 
@@ -151,17 +327,31 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
             match osk_state.get() {
                 SceUtilityOskState::None => done = true,
                 SceUtilityOskState::Visible => {
-                    sceUtilityOskUpdate(1);
+                    //sceUtilityOskUpdate(1);
+                    sceUtilityOskShutdownStart();
                 }
                 SceUtilityOskState::Quit => {
-                    sceUtilityOskShutdownStart();
+                    //sceUtilityOskShutdownStart();
+                    done = true;
+                }
+                SceUtilityOskState::Finished => {
+                    //sceUtilityOskShutdownStart();
+                    done = true;
+                }
+                SceUtilityOskState::Initialized => {
+                    sceUtilityOskUpdate(1);
                 }
                 _ => {}
             }
 
-            sceDisplayWaitVblankStart();
-            sceGuSwapBuffers();
+            //pspDebugScreenInit();
+            //pspDebugScreenSetXY(0, 0);
+
+            //sceDisplayWaitVblankStart();
+            //sceGuSwapBuffers();
         };
+
+        DONE.store(true, core::sync::atomic::Ordering::SeqCst);
     }
 
     let osk_data: SceUtilityOskData = unsafe { *(*params).data };

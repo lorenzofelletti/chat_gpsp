@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::borrow::ToOwned;
-use osk::{read_from_osk, start_osk};
+use osk::{main_fn, read_from_osk, start_osk};
 use psp::sys::{
     self, SceUtilityOskData, SceUtilityOskInputLanguage, SceUtilityOskInputType,
     SceUtilityOskParams,
@@ -33,6 +33,8 @@ const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 #[no_mangle]
 fn psp_main() {
     psp::enable_home_button();
+
+    main_fn();
     /*unsafe {
         load_modules();
         init();
@@ -60,6 +62,7 @@ fn psp_main() {
         }
     }*/
 
+    /*
     let mut out_text = [0u16; CHAT_MAX_LENGTH_USIZE];
     let mut description = "ask GPT".to_owned();
     let max_text_length = CHAT_MAX_LENGTH;
@@ -71,7 +74,7 @@ fn psp_main() {
     start_osk(params).expect("failed to start osk");
 
     let read_text = read_from_osk(params).unwrap_or_default();
-    psp::dprintln!("read text: '{:?}'", read_text);
+    psp::dprintln!("read text: '{:?}'", read_text);*/
 
     /*
     let socket = net::Socket::open().expect("failed to open socket");
