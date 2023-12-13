@@ -1,6 +1,6 @@
 use core::{ffi::c_void, mem::size_of, sync::atomic::AtomicBool};
 
-use alloc::{borrow::ToOwned, string::String, vec, vec::Vec};
+use alloc::{borrow::ToOwned, string::String, sync::Arc, vec, vec::Vec};
 use lazy_static::lazy_static;
 use psp::{
     dprint,
@@ -18,8 +18,10 @@ use psp::{
     },
     vram_alloc::get_vram_allocator,
 };
+use widestring::{u16str, utf16str, U16Str, Utf16Str, Utf16String};
 
 static mut LIST: psp::Align16<[u32; 262144]> = psp::Align16([0; 262144]);
+
 const SCR_WIDTH: i32 = 480;
 const SCR_HEIGHT: i32 = 272;
 const BUF_WIDTH: i32 = 512;
@@ -37,6 +39,7 @@ lazy_static! {
 
 extern "C" fn exit_callback(_arg1: i32, _arg2: i32, _common: *mut c_void) -> i32 {
     DONE.store(true, core::sync::atomic::Ordering::SeqCst);
+    //unsafe { sys::sceKernelDcacheWritebackInvalidateAll() };
     0
 }
 
@@ -63,6 +66,47 @@ fn setup_callbacks() -> i32 {
         unsafe { sys::sceKernelStartThread(thid, 0, core::ptr::null_mut()) };
     }
     thid.0
+}
+
+fn str_to_u16_mut_ptr(s: &str) -> *mut u16 {
+    let mut vec = vec![0u16; s.len()];
+    for (i, c) in s.char_indices() {
+        vec[i] = c as u16;
+    }
+    vec.as_mut_ptr()
+}
+
+unsafe fn setup_new_screen() {
+    sceGuStart(
+        sys::GuContextType::Direct,
+        &mut LIST as *mut _ as *mut c_void,
+    );
+    sceGuDrawBuffer(
+        sys::DisplayPixelFormat::Psm8888,
+        0 as *mut c_void,
+        BUF_WIDTH,
+    );
+    sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
+    sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
+    sceGuOffset(
+        2048 - (SCR_WIDTH as u32 / 2),
+        2048 - (SCR_HEIGHT as u32 / 2),
+    );
+    sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
+    sceGuDepthRange(0xc350, 0x2710);
+    sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    sceGuEnable(GuState::ScissorTest);
+    sceGuDepthFunc(sys::DepthFunc::GreaterOrEqual);
+    sceGuEnable(GuState::DepthTest);
+    sceGuFrontFace(sys::FrontFaceDirection::Clockwise);
+    sceGuShadeModel(sys::ShadingModel::Flat);
+    sceGuEnable(GuState::CullFace);
+    sceGuEnable(GuState::Texture2D);
+    sceGuEnable(GuState::ClipPlanes);
+    sceGuFinish();
+    sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+    sceDisplayWaitVblankStart();
+    sceGuDisplay(true);
 }
 
 pub fn main_fn() {
@@ -102,10 +146,16 @@ pub fn main_fn() {
         sceGuDisplay(true);
 
         let mut out_text = [0u16; CHAT_MAX_LENGTH_USIZE];
-        let mut description = "ask GPT".to_owned();
+        //let str: &U16Str = u16str!("Ask GPT");
+        //let mut description = [0u16; CHAT_MAX_LENGTH_USIZE];
+        //for (i, c) in str.char_indices() {
+        //    description[i] = c.unwrap() as u16;
+        //}
+        let description = str_to_u16_mut_ptr("Ask GPT");
+
         let max_text_length = CHAT_MAX_LENGTH;
 
-        let mut osk_data = get_osk_data(&mut description, max_text_length, &mut out_text);
+        let mut osk_data = get_osk_data(description, max_text_length, &mut out_text);
 
         let params = &mut default_utility_osk_params(&mut osk_data);
 
@@ -116,6 +166,10 @@ pub fn main_fn() {
         while !DONE.load(core::sync::atomic::Ordering::SeqCst) {
             sceKernelDelayThread(1_000);
         }
+
+        sys::sceKernelDcacheWritebackInvalidateAll();
+
+        /*
 
         let allocator = get_vram_allocator().unwrap();
         let fbp0 = allocator
@@ -137,10 +191,34 @@ pub fn main_fn() {
         sys::sceDisplayWaitVblankStart();
         sys::sceGuDisplay(true);
 
-        psp::dprintln!("read text: '{:?}'", read_text);
-        sceGuTerm();
+        psp::dprintln!("read text: '{:?}'", read_text);*/
 
-        sceKernelExitGame();
+        /*for _ in 0..5 {
+            sceKernelDelayThread(1_000);
+        }*/
+
+        /*sys::sceGuStart(
+            sys::GuContextType::Direct,
+            &mut LIST as *mut _ as *mut c_void,
+        );*/
+
+        // setup_new_screen();
+
+        // sys::sceGuDebugPrint(100, 100, 0xff0000ff, b"Hello World\0" as *const u8);
+        // sys::sceGuDebugFlush();
+
+        // sys::sceGuFinish();
+        // sys::sceGuSync(sys::GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+        // sys::sceDisplayWaitVblankStart();
+        // sys::sceGuDisplay(true);
+
+        psp::dprintln!("read text: '{:?}'", read_text);
+
+        //Sys::sceGuDebugPrint(100, 100, 0xff00ffff, b"Hello World\0" as *const u8);
+
+        //sceGuTerm();
+
+        //sceKernelExitGame();
     }
 }
 
@@ -196,13 +274,12 @@ fn mut_ptr_u16_to_vec_u16(ptr: *mut u16, len: usize) -> Vec<u16> {
 }
 
 pub fn get_osk_data(
-    description: &mut str,
+    description: *mut u16,
     max_text_length: u16,
     out_text: &mut [u16],
 ) -> SceUtilityOskData {
-    let mut msg: [u8; 512] = [0u8; 512];
-    msg[..description.len()].copy_from_slice(description.as_bytes());
-    let mut in_text = [0u16; 0];
+    let mut in_text = [0u16; CHAT_MAX_LENGTH_USIZE];
+
     SceUtilityOskData {
         unk_00: 0,
         unk_04: 0,
@@ -211,7 +288,7 @@ pub fn get_osk_data(
         inputtype: SceUtilityOskInputType::All,
         lines: 1,
         unk_24: 1,
-        desc: [].as_mut_ptr(), // description.as_mut_ptr() as *mut u16,
+        desc: description, // description.as_mut_ptr() as *mut u16,
         intext: in_text.as_mut_ptr(),
         outtextlength: max_text_length.into(),
         outtext: out_text.as_mut_ptr(),
@@ -354,7 +431,7 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
             //sceGuSwapBuffers();
         };
 
-        DONE.store(true, core::sync::atomic::Ordering::SeqCst);
+        //DONE.store(true, core::sync::atomic::Ordering::SeqCst);
     }
 
     let osk_data: SceUtilityOskData = unsafe { *(*params).data };
@@ -364,6 +441,7 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
         _ => {
             let out_text =
                 mut_ptr_u16_to_vec_u16(osk_data.outtext, osk_data.outtextlength as usize);
+
             Some(String::from_utf16(&out_text).unwrap())
         }
     }
