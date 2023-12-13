@@ -9,6 +9,7 @@ use core::ffi::c_void;
 pub struct Socket(i32);
 
 impl Socket {
+    #[allow(dead_code)]
     pub fn open() -> Result<Socket, ()> {
         let sock = unsafe { sys::sceNetInetSocket(netc::AF_INET as i32, netc::SOCK_STREAM, 0) };
         if sock < 0 {
@@ -18,6 +19,7 @@ impl Socket {
         }
     }
 
+    #[allow(dead_code)]
     pub fn connect(&self, remote: HostSocketAddr) -> Result<(), ()> {
         match remote.as_socket_addr() {
             SocketAddr::V4(v4) => {
@@ -92,8 +94,9 @@ impl drogue_tls::traits::Write for Socket {
 
 #[allow(nonstandard_style)]
 pub mod netc {
+    #[allow(dead_code)]
     pub const AF_INET: u8 = 2;
-
+    #[allow(dead_code)]
     pub const SOCK_STREAM: i32 = 1;
 
     pub use psp::sys::in_addr;
