@@ -9,8 +9,8 @@ use super::utils::str_to_u16_mut_ptr;
 
 pub fn default_osk_data(
     description: *mut u16,
-    max_text_length: u16,
-    out_text: &mut [u16],
+    max_text_length: i32,
+    out_text: *mut u16,
 ) -> SceUtilityOskData {
     let in_text = str_to_u16_mut_ptr("\0");
 
@@ -21,11 +21,11 @@ pub fn default_osk_data(
         unk_12: 0,
         inputtype: SceUtilityOskInputType::All,
         lines: 1,
-        unk_24: 1,
+        unk_24: 0, //1,
         desc: description,
         intext: in_text,
-        outtextlength: max_text_length.into(),
-        outtext: out_text.as_mut_ptr(),
+        outtextlength: max_text_length,
+        outtext: out_text,
         result: sys::SceUtilityOskResult::Unchanged,
         outtextlimit: max_text_length.into(),
     }

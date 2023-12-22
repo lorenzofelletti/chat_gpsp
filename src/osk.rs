@@ -3,43 +3,39 @@ use core::ffi::c_void;
 use alloc::{string::String, vec::Vec};
 
 use psp::{
-    dprint,
+    dprint, dprintln,
     sys::{
-        self, sceDisplayWaitVblankStart, sceGuClear, sceGuDebugFlush, sceGuDebugPrint,
+        self, sceDisplayWaitVblankStart, sceGuClear, sceGuColor, sceGuDebugFlush, sceGuDebugPrint,
         sceGuDepthBuffer, sceGuDepthFunc, sceGuDepthRange, sceGuDispBuffer, sceGuDisplay,
         sceGuDrawBuffer, sceGuEnable, sceGuFinish, sceGuFrontFace, sceGuInit, sceGuOffset,
-        sceGuScissor, sceGuShadeModel, sceGuStart, sceGuSwapBuffers, sceGuSync, sceGuTerm,
-        sceGuViewport, sceKernelDcacheWritebackAll, sceKernelDcacheWritebackInvalidateAll,
-        sceUtilityOskInitStart, sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer,
-        DisplayPixelFormat, GuState, GuSyncBehavior, GuSyncMode, SceUtilityOskData,
-        SceUtilityOskParams, SceUtilityOskState, TexturePixelFormat,
+        sceGuScissor, sceGuShadeModel, sceGuSignal, sceGuStart, sceGuSwapBuffers, sceGuSync,
+        sceGuTerm, sceGuViewport, sceKernelDcacheWritebackAll,
+        sceKernelDcacheWritebackInvalidateAll, sceKernelDelayThread, sceKernelExitGame,
+        sceUtilityOskGetStatus, sceUtilityOskInitStart, sceUtilityOskShutdownStart,
+        sceUtilityOskUpdate, ClearBuffer, DisplayPixelFormat, GuState, GuSyncBehavior, GuSyncMode,
+        SceUtilityOskData, SceUtilityOskParams, SceUtilityOskState, TexturePixelFormat,
     },
     vram_alloc::get_vram_allocator,
 };
 
-use crate::osk::utils::*;
-use crate::osk::{constants::*, prelude::default_osk_data};
 use crate::osk::{osk_state::OskState, prelude::default_osk_params};
+use crate::{osk::utils::*, renderer::Renderer};
+use crate::{
+    osk::{constants::*, prelude::default_osk_data},
+    renderer,
+};
 
 pub mod constants;
 pub mod osk_state;
 pub mod prelude;
 pub mod utils;
 
-static mut LIST: psp::Align16<[u32; 262144]> = psp::Align16([0; 262144]);
+static mut LIST: psp::Align16<[u32; 262_144]> = psp::Align16([0; 262_144]);
 
-pub fn main_fn() {
+#[inline(always)]
+fn setup_buffers(fbp0: *mut u8) {
     unsafe {
-        sceGuInit();
-        sceGuStart(
-            sys::GuContextType::Direct,
-            &mut LIST as *mut _ as *mut c_void,
-        );
-        sceGuDrawBuffer(
-            sys::DisplayPixelFormat::Psm8888,
-            0 as *mut c_void,
-            BUF_WIDTH,
-        );
+        sceGuDrawBuffer(DisplayPixelFormat::Psm8888, fbp0 as _, BUF_WIDTH);
         sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
         sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
         sceGuOffset(
@@ -57,40 +53,52 @@ pub fn main_fn() {
         sceGuEnable(GuState::CullFace);
         sceGuEnable(GuState::Texture2D);
         sceGuEnable(GuState::ClipPlanes);
+    }
+}
+
+pub fn main_fn() {
+    let allocator = get_vram_allocator().unwrap();
+    let fbp0: *mut u8 = 0 as _;
+    // let fbp0 = allocator
+    //     .alloc_texture_pixels(BUF_WIDTH_U32, SCR_HEIGHT_U32, TexturePixelFormat::Psm8888)
+    //     .as_mut_ptr_from_zero();
+
+    psp::dprintln!("cvbikjla");
+
+    unsafe {
+        sceGuInit();
+
+        sceGuStart(
+            sys::GuContextType::Direct,
+            &mut LIST as *mut _ as *mut c_void,
+        );
+        setup_buffers(fbp0);
         sceGuFinish();
         sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
         sceDisplayWaitVblankStart();
         sceGuDisplay(true);
 
-        let mut out_text = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
-        let mut out_text = out_text.as_mut_slice();
+        let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
+        let out_capacity: i32 = out_text.capacity() as i32;
 
         let description = str_to_u16_mut_ptr("Ask GPT\0");
 
-        let max_text_length = CHAT_MAX_LENGTH;
-
-        let mut osk_data = default_osk_data(description, max_text_length, &mut out_text);
+        let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
 
         let params = &mut default_osk_params(&mut osk_data);
 
         start_osk(params).expect("failed to start osk");
 
-        let read_text = read_from_osk(params).unwrap_or_default();
-        //assert_eq!(2, 1);
+        let read_text = read_from_osk(params, None).unwrap_or_default();
 
-        sceKernelDcacheWritebackAll();
-        //sys::sceKernelDcacheWritebackInvalidateAll();
-
-        sceGuFinish();
-        sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+        sys::sceKernelDcacheWritebackInvalidateAll();
 
         psp::dprintln!("read text: '{:?}'", read_text);
     }
 }
 
-fn setup_gu() {
+pub fn setup_gu() {
     unsafe {
-        //sys::sceGuInit();
         sys::sceGuStart(
             sys::GuContextType::Direct,
             &mut LIST as *mut _ as *mut c_void,
@@ -100,22 +108,22 @@ fn setup_gu() {
             core::ptr::null_mut(),
             BUF_WIDTH,
         );
-        sys::sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
-        sys::sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
-        sys::sceGuOffset(
-            2048 - (SCR_WIDTH as u32 / 2),
-            2048 - (SCR_HEIGHT as u32 / 2),
-        );
-        sys::sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
-        sys::sceGuDepthRange(0xc350, 0x2710);
-        sys::sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
-        sys::sceGuEnable(sys::GuState::ScissorTest);
-        sys::sceGuDepthFunc(sys::DepthFunc::GreaterOrEqual);
-        sys::sceGuEnable(sys::GuState::DepthTest);
-        sys::sceGuFrontFace(sys::FrontFaceDirection::Clockwise);
-        sys::sceGuShadeModel(sys::ShadingModel::Smooth);
-        sys::sceGuEnable(sys::GuState::CullFace);
-        sys::sceGuEnable(sys::GuState::ClipPlanes);
+        // sys::sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
+        // sys::sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
+        // sys::sceGuOffset(
+        //     2048 - (SCR_WIDTH as u32 / 2),
+        //     2048 - (SCR_HEIGHT as u32 / 2),
+        // );
+        // sys::sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
+        // sys::sceGuDepthRange(0xc350, 0x2710);
+        // sys::sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        // sys::sceGuEnable(sys::GuState::ScissorTest);
+        // sys::sceGuDepthFunc(sys::DepthFunc::GreaterOrEqual);
+        // sys::sceGuEnable(sys::GuState::DepthTest);
+        // sys::sceGuFrontFace(sys::FrontFaceDirection::Clockwise);
+        // sys::sceGuShadeModel(sys::ShadingModel::Smooth);
+        // sys::sceGuEnable(sys::GuState::CullFace);
+        // sys::sceGuEnable(sys::GuState::ClipPlanes);
         sys::sceGuFinish();
         sys::sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
 
@@ -126,7 +134,6 @@ fn setup_gu() {
 
 #[inline]
 pub fn start_osk(params: &mut SceUtilityOskParams) -> Result<(), &str> {
-    //setup_gu();
     unsafe {
         if sceUtilityOskInitStart(params as *mut SceUtilityOskParams) == 0 {
             Ok(())
@@ -136,12 +143,20 @@ pub fn start_osk(params: &mut SceUtilityOskParams) -> Result<(), &str> {
     }
 }
 
-pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
-    let params = params as *mut SceUtilityOskParams;
-
+pub fn read_from_osk(
+    params: &mut SceUtilityOskParams,
+    renderer: Option<&Renderer>,
+) -> Option<String> {
+    let renderer = renderer.unwrap();
     let mut done = false;
-
     let mut osk_state = OskState::new();
+
+    let mut all_osk_states = Vec::new();
+
+    //renderer.clear(0x00000000);
+
+    //setup_gu();
+    //unsafe { sys::sceGuDisplay(true) };
 
     unsafe {
         while !done {
@@ -149,32 +164,103 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
                 sys::GuContextType::Direct,
                 &mut LIST as *mut _ as *mut c_void,
             );
-            sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+            //sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
             sceGuFinish();
             sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
 
-            sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+            //renderer.clear(0x00000000);
+
+            //sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+            //sceKernelDelayThread(16_000);
+
+            let status = sceUtilityOskGetStatus();
+            if !all_osk_states.contains(&status) {
+                all_osk_states.push(status);
+                psp::dprintln!("status: {:?}", status);
+            }
 
             match osk_state.get() {
                 SceUtilityOskState::None => done = true,
+                // should be called SceUtilityOskState::Visible
                 SceUtilityOskState::Initialized => {
                     if sceUtilityOskUpdate(1).is_negative() {
                         panic!("cannot update osk");
                     }
+                    //sceGuSwapBuffers();
                 }
+                // should be called SceUtilityOskState::Quit
                 SceUtilityOskState::Visible => {
                     if sceUtilityOskShutdownStart().is_negative() {
                         panic!("cannot shutdown osk");
                     }
+                    loop {
+                        let status = sceUtilityOskGetStatus();
+                        if !all_osk_states.contains(&status) {
+                            all_osk_states.push(status);
+                            psp::dprintln!("status: {:?}", status);
+                        }
+                        if matches!(osk_state.get(), SceUtilityOskState::None) {
+                            sceDisplayWaitVblankStart();
+                            sceGuSwapBuffers();
+                            break;
+                        }
+                    }
                 }
-                _ => psp::dprintln!("osk state: {:?}", osk_state.get()),
+                _ => (),
             }
             sceDisplayWaitVblankStart();
             sceGuSwapBuffers();
         }
+
+        // sceGuStart(
+        //     sys::GuContextType::Direct,
+        //     &mut LIST as *mut _ as *mut c_void,
+        // );
+        // sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+        // sceGuFinish();
+        // sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
     }
-    unsafe { LIST = psp::Align16([0; 262144]) };
-    x();
+    //unsafe {
+    //    sceGuFinish();
+    //    sceGuTerm();
+    //};
+
+    //unsafe { sceKernelDelayThread(100_000) };
+
+    // loop {
+    // psp::dprintln!("cdsvbeonskavbe");
+    // }
+
+    //unsafe { sceGuSwapBuffers() };
+
+    //unsafe { sceKernelDcacheWritebackInvalidateAll() };
+
+    //psp::dprintln!("finised");
+
+    // unsafe {
+    //     //sceGuFinish();
+    //     //sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+
+    //     let done = false;
+    //     while !done {
+    //         sceGuStart(
+    //             sys::GuContextType::Direct,
+    //             &mut LIST as *mut _ as *mut c_void,
+    //         );
+    //         sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+    //         sceGuColor(0xff0000ff);
+    //         sceGuFinish();
+    //         sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
+
+    //         sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
+    //         sceGuColor(0xff0000ff);
+
+    //         sceDisplayWaitVblankStart();
+    //         sceGuSwapBuffers();
+    //     }
+    // }
+    //unsafe { LIST = psp::Align16([0; 262144]) };
+    //x();
     //unsafe { sceKernelDcacheWritebackInvalidateAll() };
     /*
         unsafe {
@@ -200,27 +286,39 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
             }
         }
     */
-    let osk_params = unsafe { params.as_ref().unwrap() };
+    //let osk_params = unsafe { params.as_ref().unwrap() };
 
-    let osk_data: &SceUtilityOskData = unsafe { osk_params.data.as_ref().unwrap() };
+    if all_osk_states.len() == 6 {
+        unsafe { sceKernelExitGame() };
+    }
+
+    let osk_data: &SceUtilityOskData = unsafe { params.data.as_ref().unwrap() };
+    //unsafe { osk_params.data.as_ref().unwrap() };
+    //panic!("");
     //assert!(
     //    matches!(osk_data.result, sys::SceUtilityOskResult::Cancelled),
     //    "Result is not cancelled"
     //);
     // get osk_data.result
+
     match osk_data.result {
         sys::SceUtilityOskResult::Cancelled => None,
         _ => {
             let out_text =
                 mut_ptr_u16_to_vec_char(osk_data.outtext, osk_data.outtextlength as usize);
 
-            None
+            //panic!("");
+
+            //let x: Vec<u16> = Vec::with_capacity(30);
+            //let size: i32 = x.capacity() as i32;
+
+            //None
 
             //assert_eq!(2, 1);
             //x();
-            //let mut out_text = String::new();
+            let out_text = String::from_iter(out_text);
             //assert_eq!(2, 1);
-            //Some("out_text".to_owned())
+            Some(out_text)
         }
     }
 }
@@ -233,18 +331,23 @@ pub fn x() {
         .as_mut_ptr_from_zero();
 
     unsafe {
-        //sys::sceGuInit();
-        sys::sceGuStart(
-            sys::GuContextType::Direct,
-            &mut LIST as *mut _ as *mut c_void,
-        );
-        sys::sceGuDrawBuffer(DisplayPixelFormat::Psm8888, fbp0 as _, BUF_WIDTH);
-        sys::sceGuDebugPrint(100, 100, 0xff0000ff, b"Hello World\0" as *const u8);
-        sys::sceGuDebugFlush();
-
-        sys::sceGuFinish();
-        sys::sceGuSync(sys::GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+        sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
         sys::sceDisplayWaitVblankStart();
-        sys::sceGuDisplay(true);
+        sceGuSwapBuffers();
+        loop {
+            sys::sceGuStart(
+                sys::GuContextType::Direct,
+                &mut LIST as *mut _ as *mut c_void,
+            );
+            sys::sceGuDrawBuffer(DisplayPixelFormat::Psm8888, fbp0 as _, BUF_WIDTH);
+            sys::sceGuDebugPrint(100, 100, 0xff0000ff, b"Hello World\0" as *const u8);
+            sys::sceGuDebugFlush();
+
+            sys::sceGuFinish();
+            sys::sceGuSync(sys::GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+            sys::sceDisplayWaitVblankStart();
+            sceGuSwapBuffers();
+        }
+        //sys::sceGuDisplay(true);
     }
 }
