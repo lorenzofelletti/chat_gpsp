@@ -13,18 +13,16 @@ use alloc::vec::Vec;
 use osk::{
     prelude::{default_osk_data, default_osk_params},
     read_from_osk, start_osk,
-    utils::str_to_u16_mut_ptr,
 };
-use psp::sys::{sceGuInit, sceGuTerm, sceKernelDcacheWritebackAll, sceKernelExitGame};
-use renderer::Renderer;
+use psp::sys::{sceGuTerm, sceKernelDcacheWritebackAll, sceKernelExitGame};
 
-use crate::osk::{setup_buffers, setup_gu};
+use crate::{osk::setup_gu, utils::str_to_u16_mut_ptr};
 
 psp::module!("tls-test", 1, 1);
 
 mod net;
 mod osk;
-mod renderer;
+pub mod utils;
 
 #[allow(dead_code)]
 fn select_netconfig() -> i32 {
@@ -32,7 +30,7 @@ fn select_netconfig() -> i32 {
 }
 
 #[allow(dead_code)]
-const CHAT_MAX_LENGTH: u16 = 32;
+const CHAT_MAX_LENGTH: u16 = 128;
 #[allow(dead_code)]
 const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 
@@ -40,62 +38,24 @@ const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 fn psp_main() {
     psp::enable_home_button();
 
-    unsafe { sceKernelDcacheWritebackAll() }
-
     unsafe {
-        let mut renderer = Renderer::new();
-
-        let mut i = 0;
-
-        psp::dprintln!("cds");
-        // loop {
-        //     renderer.clear(0xFFFFCA82);
-        //     renderer.draw_rect(10, 10 + i, 30, 30, 0xFF00FFFF);
-
-        //     i += 1;
-
-        //     if i == 100 {
-        //         break;
-        //     }
-
-        //     renderer.swap_buffers_and_wait();
-        // }
+        sceKernelDcacheWritebackAll();
 
         let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
         let out_capacity: i32 = out_text.capacity() as i32;
 
         let description = str_to_u16_mut_ptr("Ask GPT\0");
-
         let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
 
         let params = &mut default_osk_params(&mut osk_data);
 
-        sceGuInit();
         setup_gu();
-        // setup_buffers(
-        //     renderer.draw_buffer() as *mut u8,
-        //     renderer.disp_buffer() as *mut u8,
-        // );
 
         start_osk(params).expect("failed to start osk");
 
-        let read_text = read_from_osk(params, Some(&renderer)).unwrap_or_default();
+        let read_text = read_from_osk(params).unwrap_or_default();
 
         psp::dprintln!("read_text: {:?}", read_text);
-
-        loop {
-            psp::dprintln!("read_text: {:?}", read_text);
-        }
-
-        let mut i = 0;
-        loop {
-            renderer.clear(0xFFFFCA82);
-            renderer.draw_rect(10, 10 + i, 30, 30, 0xFF00FFFF);
-
-            i = (i + 1) % 100;
-
-            renderer.swap_buffers_and_wait();
-        }
     }
 
     unsafe {

@@ -6,17 +6,17 @@ pub struct OskState {
 }
 
 impl OskState {
-    /// Create a new OskState.
     #[allow(dead_code)]
     #[inline]
+    /// Create a new OskState.
     pub fn new() -> Self {
         Self {
             state: unsafe { core::mem::transmute(sceUtilityOskGetStatus()) },
         }
     }
 
-    /// Get the current state of the osk.
     #[inline]
+    /// Get the current state of the osk.
     pub fn get(&mut self) -> SceUtilityOskState {
         self.state = unsafe { core::mem::transmute(sceUtilityOskGetStatus()) };
         self.state

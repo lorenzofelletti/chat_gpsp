@@ -5,7 +5,7 @@ use psp::sys::{
     SceUtilityOskParams, UtilityDialogCommon,
 };
 
-use super::utils::str_to_u16_mut_ptr;
+use crate::utils::str_to_u16_mut_ptr;
 
 pub fn default_osk_data(
     description: *mut u16,
@@ -21,7 +21,7 @@ pub fn default_osk_data(
         unk_12: 0,
         inputtype: SceUtilityOskInputType::All,
         lines: 1,
-        unk_24: 0, //1,
+        unk_24: 0,
         desc: description,
         intext: in_text,
         outtextlength: max_text_length,
@@ -38,11 +38,11 @@ pub fn default_osk_params(data: &mut SceUtilityOskData) -> SceUtilityOskParams {
             size: size_of::<SceUtilityOskParams>() as u32,
             language: sys::SystemParamLanguage::English,
             button_accept: sys::UtilityDialogButtonAccept::Cross,
-            graphics_thread: 0x11, //17,
-            access_thread: 0x13,   //19,
-            font_thread: 0x12,     //18,
-            sound_thread: 0x10,    //16,
-            result: 0,             //i32::default(),
+            graphics_thread: 0x11,
+            access_thread: 0x13,
+            font_thread: 0x12,
+            sound_thread: 0x10,
+            result: 0,
             reserved: [0i32; 4],
         },
         datacount: 1,
