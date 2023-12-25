@@ -47,7 +47,7 @@ pub fn default_osk_params(data: &mut SceUtilityOskData) -> SceUtilityOskParams {
         },
         datacount: 1,
         data: data,
-        state: sys::SceUtilityOskState::Visible, //None,
+        state: sys::SceUtilityOskState::None,
         unk_60: 0,
     }
 }

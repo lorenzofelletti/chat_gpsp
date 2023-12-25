@@ -1,29 +1,23 @@
 use core::ffi::c_void;
 
-use alloc::{string::String, vec::Vec};
+use alloc::string::String;
 
 use psp::{
-    dprint, dprintln,
     sys::{
-        self, sceDisplayWaitVblankStart, sceGuClear, sceGuColor, sceGuDebugFlush, sceGuDebugPrint,
-        sceGuDepthBuffer, sceGuDepthFunc, sceGuDepthRange, sceGuDispBuffer, sceGuDisplay,
-        sceGuDrawBuffer, sceGuEnable, sceGuFinish, sceGuFrontFace, sceGuInit, sceGuOffset,
-        sceGuScissor, sceGuShadeModel, sceGuSignal, sceGuStart, sceGuSwapBuffers, sceGuSync,
-        sceGuTerm, sceGuViewport, sceKernelDcacheWritebackAll,
-        sceKernelDcacheWritebackInvalidateAll, sceKernelDelayThread, sceKernelExitGame,
-        sceUtilityOskGetStatus, sceUtilityOskInitStart, sceUtilityOskShutdownStart,
-        sceUtilityOskUpdate, ClearBuffer, DisplayPixelFormat, GuState, GuSyncBehavior, GuSyncMode,
-        SceUtilityOskData, SceUtilityOskParams, SceUtilityOskState, TexturePixelFormat,
+        self, sceDisplayWaitVblankStart, sceGuAlphaFunc, sceGuClear, sceGuDepthBuffer,
+        sceGuDepthFunc, sceGuDepthRange, sceGuDispBuffer, sceGuDrawBuffer, sceGuEnable,
+        sceGuFinish, sceGuFrontFace, sceGuOffset, sceGuScissor, sceGuShadeModel, sceGuStart,
+        sceGuSwapBuffers, sceGuSync, sceGuViewport, sceUtilityOskInitStart,
+        sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer, DisplayPixelFormat, GuState,
+        GuSyncBehavior, GuSyncMode, SceUtilityOskData, SceUtilityOskParams, SceUtilityOskState,
+        TexturePixelFormat,
     },
     vram_alloc::get_vram_allocator,
 };
 
-use crate::osk::{osk_state::OskState, prelude::default_osk_params};
+use crate::osk::constants::*;
+use crate::osk::osk_state::OskState;
 use crate::{osk::utils::*, renderer::Renderer};
-use crate::{
-    osk::{constants::*, prelude::default_osk_data},
-    renderer,
-};
 
 pub mod constants;
 pub mod osk_state;
@@ -32,11 +26,20 @@ pub mod utils;
 
 static mut LIST: psp::Align16<[u32; 262_144]> = psp::Align16([0; 262_144]);
 
-#[inline(always)]
-fn setup_buffers(fbp0: *mut u8) {
+#[inline]
+pub fn setup_buffers(fbp0: *mut u8, fbp1: *mut u8) {
     unsafe {
+        sys::sceGuStart(
+            sys::GuContextType::Direct,
+            &mut LIST as *mut _ as *mut c_void,
+        );
+        sys::sceGuDrawBuffer(
+            sys::DisplayPixelFormat::Psm8888,
+            core::ptr::null_mut(),
+            BUF_WIDTH,
+        );
         sceGuDrawBuffer(DisplayPixelFormat::Psm8888, fbp0 as _, BUF_WIDTH);
-        sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
+        sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, fbp1 as *mut c_void, BUF_WIDTH);
         sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
         sceGuOffset(
             2048 - (SCR_WIDTH as u32 / 2),
@@ -53,47 +56,11 @@ fn setup_buffers(fbp0: *mut u8) {
         sceGuEnable(GuState::CullFace);
         sceGuEnable(GuState::Texture2D);
         sceGuEnable(GuState::ClipPlanes);
-    }
-}
+        sys::sceGuFinish();
+        sys::sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
 
-pub fn main_fn() {
-    let allocator = get_vram_allocator().unwrap();
-    let fbp0: *mut u8 = 0 as _;
-    // let fbp0 = allocator
-    //     .alloc_texture_pixels(BUF_WIDTH_U32, SCR_HEIGHT_U32, TexturePixelFormat::Psm8888)
-    //     .as_mut_ptr_from_zero();
-
-    psp::dprintln!("cvbikjla");
-
-    unsafe {
-        sceGuInit();
-
-        sceGuStart(
-            sys::GuContextType::Direct,
-            &mut LIST as *mut _ as *mut c_void,
-        );
-        setup_buffers(fbp0);
-        sceGuFinish();
-        sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
-        sceDisplayWaitVblankStart();
-        sceGuDisplay(true);
-
-        let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
-        let out_capacity: i32 = out_text.capacity() as i32;
-
-        let description = str_to_u16_mut_ptr("Ask GPT\0");
-
-        let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
-
-        let params = &mut default_osk_params(&mut osk_data);
-
-        start_osk(params).expect("failed to start osk");
-
-        let read_text = read_from_osk(params, None).unwrap_or_default();
-
-        sys::sceKernelDcacheWritebackInvalidateAll();
-
-        psp::dprintln!("read text: '{:?}'", read_text);
+        sys::sceDisplayWaitVblankStart();
+        sys::sceGuDisplay(true);
     }
 }
 
@@ -105,25 +72,46 @@ pub fn setup_gu() {
         );
         sys::sceGuDrawBuffer(
             sys::DisplayPixelFormat::Psm8888,
-            core::ptr::null_mut(),
+            (BUF_WIDTH * SCR_HEIGHT * 4) as *mut c_void, // core::ptr::null_mut(),
             BUF_WIDTH,
         );
-        // sys::sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x88000 as *mut c_void, BUF_WIDTH);
-        // sys::sceGuDepthBuffer(0x110000 as *mut c_void, BUF_WIDTH);
-        // sys::sceGuOffset(
-        //     2048 - (SCR_WIDTH as u32 / 2),
-        //     2048 - (SCR_HEIGHT as u32 / 2),
-        // );
-        // sys::sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
-        // sys::sceGuDepthRange(0xc350, 0x2710);
-        // sys::sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
-        // sys::sceGuEnable(sys::GuState::ScissorTest);
-        // sys::sceGuDepthFunc(sys::DepthFunc::GreaterOrEqual);
-        // sys::sceGuEnable(sys::GuState::DepthTest);
-        // sys::sceGuFrontFace(sys::FrontFaceDirection::Clockwise);
-        // sys::sceGuShadeModel(sys::ShadingModel::Smooth);
-        // sys::sceGuEnable(sys::GuState::CullFace);
-        // sys::sceGuEnable(sys::GuState::ClipPlanes);
+        sys::sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, 0x0 as *mut c_void, BUF_WIDTH);
+        sceGuClear(ClearBuffer::COLOR_BUFFER_BIT | ClearBuffer::DEPTH_BUFFER_BIT);
+        sys::sceGuDepthBuffer(((BUF_WIDTH * SCR_HEIGHT * 4) * 2) as *mut c_void, BUF_WIDTH);
+        sys::sceGuOffset(2048 - (SCR_WIDTH_U32 / 2), 2048 - (SCR_HEIGHT_U32 / 2));
+        sys::sceGuViewport(2048, 2048, SCR_WIDTH, SCR_HEIGHT);
+        sys::sceGuDepthRange(0xc350, 0x2710);
+        sys::sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        sys::sceGuEnable(sys::GuState::ScissorTest);
+        // enable alpha test
+        sys::sceGuAlphaFunc(sys::AlphaFunc::Greater, 0, 0xff);
+        sys::sceGuEnable(GuState::AlphaTest);
+        // enable depth test
+        sys::sceGuDepthFunc(sys::DepthFunc::Greater);
+        sys::sceGuEnable(sys::GuState::DepthTest);
+
+        sys::sceGuFrontFace(sys::FrontFaceDirection::Clockwise);
+        sys::sceGuShadeModel(sys::ShadingModel::Smooth);
+        sys::sceGuEnable(sys::GuState::CullFace);
+        // enable textures
+        sys::sceGuEnable(GuState::Texture2D);
+        sys::sceGuEnable(sys::GuState::ClipPlanes);
+        sys::sceGuTexMode(TexturePixelFormat::Psm8888, 0, 0, 0);
+        sys::sceGuTexFunc(
+            sys::TextureEffect::Replace,
+            sys::TextureColorComponent::Rgba,
+        );
+        sys::sceGuTexFilter(sys::TextureFilter::Nearest, sys::TextureFilter::Nearest);
+        sys::sceGuAmbientColor(0xff_ff_ff_ff);
+        sys::sceGuEnable(GuState::Blend);
+        sys::sceGuBlendFunc(
+            sys::BlendOp::Add,
+            sys::BlendFactor::SrcAlpha,
+            sys::BlendFactor::OneMinusSrcAlpha,
+            0,
+            0,
+        );
+
         sys::sceGuFinish();
         sys::sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
 
@@ -151,33 +139,26 @@ pub fn read_from_osk(
     let mut done = false;
     let mut osk_state = OskState::new();
 
-    let mut all_osk_states = Vec::new();
-
     //renderer.clear(0x00000000);
 
     //setup_gu();
     //unsafe { sys::sceGuDisplay(true) };
 
     unsafe {
+        sceGuSwapBuffers();
         while !done {
-            sceGuStart(
-                sys::GuContextType::Direct,
-                &mut LIST as *mut _ as *mut c_void,
-            );
+            //sceGuStart(
+            //    sys::GuContextType::Direct,
+            //    &mut LIST as *mut _ as *mut c_void,
+            //);
             //sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
-            sceGuFinish();
-            sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
+            //sceGuFinish();
+            //sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
 
             //renderer.clear(0x00000000);
 
             //sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
-            //sceKernelDelayThread(16_000);
-
-            let status = sceUtilityOskGetStatus();
-            if !all_osk_states.contains(&status) {
-                all_osk_states.push(status);
-                psp::dprintln!("status: {:?}", status);
-            }
+            //sys::sceKernelDelayThread(16_000);
 
             match osk_state.get() {
                 SceUtilityOskState::None => done = true,
@@ -193,24 +174,17 @@ pub fn read_from_osk(
                     if sceUtilityOskShutdownStart().is_negative() {
                         panic!("cannot shutdown osk");
                     }
-                    loop {
-                        let status = sceUtilityOskGetStatus();
-                        if !all_osk_states.contains(&status) {
-                            all_osk_states.push(status);
-                            psp::dprintln!("status: {:?}", status);
-                        }
-                        if matches!(osk_state.get(), SceUtilityOskState::None) {
-                            sceDisplayWaitVblankStart();
-                            sceGuSwapBuffers();
-                            break;
-                        }
-                    }
                 }
                 _ => (),
             }
             sceDisplayWaitVblankStart();
-            sceGuSwapBuffers();
+            //sceGuSwapBuffers();
         }
+
+        sceUtilityOskShutdownStart();
+        sceDisplayWaitVblankStart();
+        sceGuSwapBuffers();
+        sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
 
         // sceGuStart(
         //     sys::GuContextType::Direct,
@@ -287,10 +261,6 @@ pub fn read_from_osk(
         }
     */
     //let osk_params = unsafe { params.as_ref().unwrap() };
-
-    if all_osk_states.len() == 6 {
-        unsafe { sceKernelExitGame() };
-    }
 
     let osk_data: &SceUtilityOskData = unsafe { params.data.as_ref().unwrap() };
     //unsafe { osk_params.data.as_ref().unwrap() };

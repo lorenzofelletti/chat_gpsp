@@ -76,4 +76,12 @@ impl Renderer {
             }
         }
     }
+
+    pub fn draw_buffer(&self) -> *mut u32 {
+        self.draw_buffer
+    }
+
+    pub fn disp_buffer(&self) -> *mut u32 {
+        self.disp_buffer
+    }
 }
