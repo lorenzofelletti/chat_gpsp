@@ -108,6 +108,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "chat_gpsp"
+version = "0.1.0"
+dependencies = [
+ "drogue-network",
+ "drogue-tls",
+ "lazy_static",
+ "psp",
+ "rand",
+ "rand_chacha",
+ "widestring",
+]
+
+[[package]]
 name = "cipher"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -540,19 +553,6 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
-
-[[package]]
-name = "trysp_rust_on_psp"
-version = "0.1.0"
-dependencies = [
- "drogue-network",
- "drogue-tls",
- "lazy_static",
- "psp",
- "rand",
- "rand_chacha",
- "widestring",
-]
 
 [[package]]
 name = "typenum"

@@ -1,5 +1,5 @@
 [package]
-name = "trysp_rust_on_psp"
+name = "chat_gpsp"
 version = "0.1.0"
 edition = "2021"
 

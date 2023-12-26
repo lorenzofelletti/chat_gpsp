@@ -1,7 +1,8 @@
-# TrySP
-## Rust on PSP
+# ChatGPSP
+ChatGPSP is an application for Sony PSP that allows you to chat with ChatGPT using your PSP connected to the internet.
 
-> Rust on psp relies on `rust-psp`, that requires to have a `rustc` nightly version installed.
+## Rust on PSP
+> Rust on psp relies on `rust-psp`, which requires to have a `rustc` set in nightly version.
 
 To setup rust nigthly "directory-wise" you can use:
 
@@ -16,5 +17,5 @@ The project main dependencies are:
 To create the EBOOT.PBP file, run:
 
 ```bash
-cargo psp
+cargo psp --release # it is recommended to always build in release mode
 ```
