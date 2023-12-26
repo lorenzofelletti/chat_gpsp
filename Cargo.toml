@@ -1,11 +1,18 @@
 [package]
-name = "trysp_rust_on_psp"
+name = "chat_gpsp"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-psp = { version = "0.3.3", features = ["embedded-graphics"]}
-embedded-graphics = { version = "0.7.1", features = ["fixed_point"]}
-tinybmp = { version = "0.3.1" }
+psp = { version = "0.3.7" }
+drogue-tls = { version = "0.2", default-features=false }
+drogue-network = "0.2"
+rand = { version = "0.8.5", default-features=false }
+rand_chacha = { version = "0.3.1", default-features=false }
+lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
+widestring = { version = "1.0.2", default-features = false, features = ["alloc"] }
+
+[profile.release]
+lto = true

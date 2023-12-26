@@ -1,75 +1,79 @@
 #![no_std]
 #![no_main]
+#![feature(c_void_variant)]
 
-use embedded_graphics::{
-    image::Image,
-    mono_font::{ascii::FONT_6X12, MonoTextStyle},
-    pixelcolor::Rgb888,
-    prelude::{Point, RgbColor, Size},
-    primitives::{Circle, Primitive, PrimitiveStyleBuilder, Rectangle, Triangle},
-    text::Text,
-    Drawable,
+extern crate alloc;
+
+#[allow(dead_code)]
+static mut VRAM: *mut u32 = 0x4000_0000 as *mut u32;
+#[allow(dead_code)]
+static mut LIST: psp::Align16<[u32; 262_144]> = psp::Align16([0; 262_144]);
+
+use alloc::vec::Vec;
+use osk::{
+    prelude::{default_osk_data, default_osk_params},
+    read_from_osk, start_osk,
 };
-use psp::embedded_graphics::Framebuffer;
-use tinybmp::Bmp;
+use psp::sys::{sceGuTerm, sceKernelDcacheWritebackAll, sceKernelExitGame};
 
-psp::module!("sample_module", 1, 1);
+use crate::{osk::setup_gu, utils::str_to_u16_mut_ptr};
 
+psp::module!("tls-test", 1, 1);
+
+mod net;
+mod osk;
+pub mod utils;
+
+#[allow(dead_code)]
+fn select_netconfig() -> i32 {
+    unsafe { psp::sys::sceUtilityCheckNetParam(1) }
+}
+
+#[allow(dead_code)]
+const CHAT_MAX_LENGTH: u16 = 128;
+#[allow(dead_code)]
+const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
+
+#[no_mangle]
 fn psp_main() {
     psp::enable_home_button();
-    let mut disp = Framebuffer::new();
 
-    let style = PrimitiveStyleBuilder::new()
-        .fill_color(Rgb888::BLACK)
-        .build();
-    let black_backdrop = Rectangle::new(Point::new(0, 0), Size::new(160, 80)).into_styled(style);
-    black_backdrop.draw(&mut disp).unwrap();
+    unsafe {
+        sceKernelDcacheWritebackAll();
 
-    // draw ferris
-    let bmp = Bmp::from_slice(include_bytes!("../assets/ferris.bmp")).unwrap();
-    let image = Image::new(&bmp, Point::zero());
-    image.draw(&mut disp).unwrap();
+        let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
+        let out_capacity: i32 = out_text.capacity() as i32;
 
-    Triangle::new(
-        Point::new(8, 66 + 16),
-        Point::new(8 + 16, 66 + 16),
-        Point::new(8 + 8, 66),
-    )
-    .into_styled(
-        PrimitiveStyleBuilder::new()
-            .stroke_color(Rgb888::RED)
-            .stroke_width(1)
-            .build(),
-    )
-    .draw(&mut disp)
-    .unwrap();
+        let description = str_to_u16_mut_ptr("Ask GPT\0");
+        let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
 
-    Rectangle::new(Point::new(36, 66), Size::new(16, 16))
-        .into_styled(
-            PrimitiveStyleBuilder::new()
-                .stroke_color(Rgb888::GREEN)
-                .stroke_width(1)
-                .build(),
-        )
-        .draw(&mut disp)
-        .unwrap();
+        let params = &mut default_osk_params(&mut osk_data);
 
-    Circle::new(Point::new(72, 66 + 8), 8)
-        .into_styled(
-            PrimitiveStyleBuilder::new()
-                .stroke_color(Rgb888::BLUE)
-                .stroke_width(1)
-                .build(),
-        )
-        .draw(&mut disp)
-        .unwrap();
+        setup_gu();
 
-    let rust = Rgb888::new(0xff, 0x07, 0x00);
-    Text::new(
-        "Hello Rust!",
-        Point::new(0, 86),
-        MonoTextStyle::new(&FONT_6X12, rust),
-    )
-    .draw(&mut disp)
-    .unwrap();
+        start_osk(params).expect("failed to start osk");
+
+        let read_text = read_from_osk(params).unwrap_or_default();
+
+        psp::dprintln!("read_text: {:?}", read_text);
+    }
+
+    unsafe {
+        sceGuTerm();
+        sceKernelExitGame();
+    };
+}
+
+#[allow(dead_code)]
+unsafe fn load_modules() {
+    psp::sys::sceUtilityLoadNetModule(psp::sys::NetModule::NetCommon);
+    psp::sys::sceUtilityLoadNetModule(psp::sys::NetModule::NetInet);
+}
+
+#[allow(dead_code)]
+unsafe fn init() {
+    psp::sys::sceNetInit(0x20000, 0x20, 0x1000, 0x20, 0x1000);
+    psp::sys::sceNetInetInit();
+    psp::sys::sceNetResolverInit();
+    psp::sys::sceNetApctlInit(0x1600, 42);
 }
