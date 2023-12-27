@@ -4,12 +4,12 @@ use alloc::string::String;
 
 use psp::{
     sys::{
-        self, sceDisplayWaitVblankStart, sceGuClear, sceGuInit, sceGuSwapBuffers, sceGuSync,
+        self, sceDisplayWaitVblankStart, sceGuClear, sceGuInit, sceGuSwapBuffers,
         sceUtilityOskInitStart, sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer,
-        GuState, GuSyncBehavior, GuSyncMode, SceUtilityOskData, SceUtilityOskParams,
-        SceUtilityOskState, TexturePixelFormat,
+        GuState, GuSyncMode, SceUtilityOskData, SceUtilityOskParams, SceUtilityOskState,
+        TexturePixelFormat,
     },
-    BUF_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH,
+    SCREEN_HEIGHT, SCREEN_WIDTH,
 };
 
 use crate::osk::osk_state::OskState;
@@ -20,6 +20,9 @@ pub mod prelude;
 
 static mut LIST: psp::Align16<[u32; 262_144]> = psp::Align16([0; 262_144]);
 
+#[inline]
+/// Setup GU
+/// Call once to setup the Graphics Utility (GU).
 pub fn setup_gu() {
     unsafe {
         sceGuInit();
@@ -30,13 +33,13 @@ pub fn setup_gu() {
         // setup buffers and viewport
         sys::sceGuDrawBuffer(
             sys::DisplayPixelFormat::Psm8888,
-            (BUF_WIDTH * SCREEN_HEIGHT * 4) as *mut c_void, // core::ptr::null_mut(),
+            (BUF_WIDTH * SCREEN_HEIGHT * 4) as *mut c_void,
             BUF_WIDTH_I32,
         );
         sys::sceGuDispBuffer(
             SCREEN_WIDTH_I32,
             SCREEN_HEIGHT_I32,
-            0x0 as *mut c_void,
+            core::ptr::null_mut(),
             BUF_WIDTH_I32,
         );
         sceGuClear(ClearBuffer::COLOR_BUFFER_BIT | ClearBuffer::DEPTH_BUFFER_BIT);
@@ -88,6 +91,15 @@ pub fn setup_gu() {
 }
 
 #[inline]
+/// Initialize an OSK (On-Screen Keyboard) dialog.
+/// Call once to initialize an OSK dialog.
+///
+/// # Parameters
+/// - `params`: A mutable reference to a [`SceUtilityOskParams`] struct.
+///
+/// # Returns
+/// - `Ok(())` if the OSK was initialized.
+/// - `Err(&str)` if the OSK was not initialized.
 pub fn start_osk(params: &mut SceUtilityOskParams) -> Result<(), &str> {
     unsafe {
         if sceUtilityOskInitStart(params as *mut SceUtilityOskParams) == 0 {
@@ -98,13 +110,36 @@ pub fn start_osk(params: &mut SceUtilityOskParams) -> Result<(), &str> {
     }
 }
 
+#[inline]
+/// Read from an OSK (On-Screen Keyboard) dialog.
+///
+/// # Parameters
+/// - `params`: A mutable reference to a [`SceUtilityOskParams`] struct.
+///
+/// # Returns
+/// - `None` if the OSK was cancelled.
+/// - `Some(String)` if the OSK was not cancelled.
+///
+/// # Panics
+/// Panics if the OSK cannot be updated or shutdown.
 pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
     let mut done = false;
     let mut osk_state = OskState::new();
 
     unsafe {
-        sceGuSwapBuffers();
+        sceDisplayWaitVblankStart(); // TODO: verify - Probably not needed
+        sceGuSwapBuffers(); // Probably not needed
         while !done {
+            sys::sceGuStart(
+                sys::GuContextType::Direct,
+                &mut LIST as *mut _ as *mut c_void,
+            );
+            sys::sceGuClear(ClearBuffer::COLOR_BUFFER_BIT | ClearBuffer::DEPTH_BUFFER_BIT);
+
+            sys::sceGuFinish();
+            sys::sceGuSync(GuSyncMode::Finish, sys::GuSyncBehavior::Wait);
+
+            sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
             match osk_state.get() {
                 // TODO: switch to PspUtilityDialogState when it's implemented
                 SceUtilityOskState::None => done = true,
@@ -121,12 +156,8 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
                 _ => (),
             }
             sceDisplayWaitVblankStart();
+            sceGuSwapBuffers();
         }
-
-        sceUtilityOskShutdownStart();
-        sceDisplayWaitVblankStart();
-        sceGuSwapBuffers();
-        sceGuSync(GuSyncMode::Finish, GuSyncBehavior::Wait);
     }
 
     let osk_data: &SceUtilityOskData = unsafe { params.data.as_ref().unwrap() };
@@ -134,8 +165,9 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
     match osk_data.result {
         sys::SceUtilityOskResult::Cancelled => None,
         _ => {
-            let out_text =
-                mut_ptr_u16_to_vec_char(osk_data.outtext, osk_data.outtextlength as usize);
+            let out_text = unsafe {
+                mut_ptr_u16_to_vec_char(osk_data.outtext, osk_data.outtextlength as usize)
+            };
 
             let out_text = String::from_iter(out_text);
 

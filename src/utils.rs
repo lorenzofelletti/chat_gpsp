@@ -12,10 +12,14 @@ pub const SCREEN_WIDTH_USIZE: usize = SCREEN_WIDTH as usize;
 pub const SCREEN_HEIGHT_I32: i32 = SCREEN_HEIGHT as i32;
 pub const SCREEN_HEIGHT_USIZE: usize = SCREEN_HEIGHT as usize;
 
-/// Convert a mutable pointer to a u16 to a Vec<u16>.
 #[allow(unused)]
 #[inline(always)]
-pub fn mut_ptr_u16_to_vec_u16(ptr: *mut u16, len: usize) -> Vec<u16> {
+/// Convert a mutable pointer to a u16 to a Vec<u16>.
+///
+/// # Safety
+/// This function is unsafe because it dereferences a raw pointer.
+/// As such, it is up to the caller to ensure that the pointer is valid.
+pub unsafe fn mut_ptr_u16_to_vec_u16(ptr: *mut u16, len: usize) -> Vec<u16> {
     #[allow(unused)]
     let vec: Vec<u16> = Vec::with_capacity(len); // otherwise it doesn't work
     let mut vec = Vec::new();
@@ -36,7 +40,17 @@ pub fn str_to_u16_mut_ptr(s: &str) -> *mut u16 {
 }
 
 #[inline(always)]
-pub fn mut_ptr_u16_to_vec_char(ptr: *mut u16, len: usize) -> Vec<char> {
+/// Convert a mutable pointer to a u16 to a Vec<char>.
+/// This function will stop when it encounters a `'\0'` character, or when it reaches `len`.
+///
+/// # Parameters
+/// * `ptr` - A mutable pointer to a u16.
+/// * `len` - The length of u16 array `ptr` points to.
+///
+/// # Safety
+/// This function is unsafe because it dereferences a raw pointer.
+/// As such, it is up to the caller to ensure that the pointer is valid, and that `len` is correct.
+pub unsafe fn mut_ptr_u16_to_vec_char(ptr: *mut u16, len: usize) -> Vec<char> {
     #[allow(unused)]
     let vec: Vec<char> = Vec::with_capacity(len);
     let mut vec = Vec::new();
