@@ -1,15 +1,21 @@
+use alloc::{format, string::String};
 use drogue_network::addr::*;
 use drogue_tls::TlsError;
 use psp::sys;
 
 use core::ffi::c_void;
 
+pub mod netc;
+pub mod utils;
+
 #[derive(Clone, Copy)]
 #[repr(C)]
+/// A socket
 pub struct Socket(i32);
 
 impl Socket {
     #[allow(dead_code)]
+    /// Open a socket
     pub fn open() -> Result<Socket, ()> {
         let sock = unsafe { sys::sceNetInetSocket(netc::AF_INET as i32, netc::SOCK_STREAM, 0) };
         if sock < 0 {
@@ -20,7 +26,15 @@ impl Socket {
     }
 
     #[allow(dead_code)]
-    pub fn connect(&self, remote: HostSocketAddr) -> Result<(), ()> {
+    /// Connect to a remote host
+    ///
+    /// # Parameters
+    /// - `remote`: The remote host to connect to
+    ///
+    /// # Returns
+    /// - `Ok(())` if the connection was successful
+    /// - `Err(String)` if the connection was unsuccessful.
+    pub fn connect(&self, remote: HostSocketAddr) -> Result<(), String> {
         match remote.as_socket_addr() {
             SocketAddr::V4(v4) => {
                 let octets = v4.ip().octets();
@@ -47,15 +61,13 @@ impl Socket {
                     )
                 } < 0
                 {
-                    unsafe {
-                        psp::dprintln!("0x{:08x}", sys::sceNetInetGetErrno());
-                    }
-                    Err(())
+                    let errno = unsafe { sys::sceNetInetGetErrno() };
+                    Err(format!("0x{:08x}", errno))
                 } else {
                     Ok(())
                 }
             }
-            SocketAddr::V6(_) => Err(()),
+            SocketAddr::V6(_) => Err("IPv6 not supported".into()),
         }
     }
 
@@ -65,7 +77,7 @@ impl Socket {
         if (result as i32) < 0 {
             Err(())
         } else {
-            Ok(result as usize)
+            Ok(result)
         }
     }
 
@@ -81,46 +93,15 @@ impl Socket {
 }
 
 impl drogue_tls::traits::Read for Socket {
+    /// Read from the socket
     fn read<'m>(&'m mut self, buf: &'m mut [u8]) -> Result<usize, TlsError> {
         self._read(buf).map_err(|_| TlsError::InternalError)
     }
 }
 
 impl drogue_tls::traits::Write for Socket {
+    /// Write to the socket
     fn write<'m>(&'m mut self, buf: &'m [u8]) -> Result<usize, TlsError> {
         self._write(buf).map_err(|_| TlsError::InternalError)
-    }
-}
-
-#[allow(nonstandard_style)]
-pub mod netc {
-    #[allow(dead_code)]
-    pub const AF_INET: u8 = 2;
-    #[allow(dead_code)]
-    pub const SOCK_STREAM: i32 = 1;
-
-    pub use psp::sys::in_addr;
-
-    pub use psp::sys::sockaddr;
-
-    #[repr(C)]
-    pub struct sockaddr_in {
-        pub sin_len: u8,
-        pub sin_family: u8,
-        pub sin_port: u16,
-        pub sin_addr: in_addr,
-        pub sin_zero: [u8; 8],
-    }
-
-    impl Clone for sockaddr_in {
-        fn clone(&self) -> Self {
-            sockaddr_in {
-                sin_len: self.sin_len,
-                sin_family: self.sin_family,
-                sin_port: self.sin_port,
-                sin_addr: psp::sys::in_addr(self.sin_addr.0),
-                sin_zero: self.sin_zero,
-            }
-        }
     }
 }
