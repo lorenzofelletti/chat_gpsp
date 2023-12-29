@@ -65,14 +65,22 @@ impl<'a> OpenAiContext<'a> {
 
     fn connect(socket: &Socket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
         let addr = resolver
-            .resolve(OPENAI_API_HOST)
+            .resolve_with_google_dns(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
-        let remote = HostSocketAddr::from(&resolver.in_addr_to_string(addr), OPENAI_API_PORT)
+
+        psp::dprintln!("resolved to {}", addr.0);
+
+        let remote = HostSocketAddr::from(&DnsResolver::in_addr_to_string(addr), OPENAI_API_PORT)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
+
+        psp::dprintln!("connecting to {}", remote.addr().ip());
 
         socket
             .connect(remote)
             .map_err(|_| OpenAiError::CannotConnect)?;
+
+        psp::dprintln!("connected");
+
         Ok(())
     }
 

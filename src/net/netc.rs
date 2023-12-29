@@ -1,7 +1,9 @@
-#[allow(dead_code)]
+#[allow(unused)]
 pub const AF_INET: u8 = 2;
-#[allow(dead_code)]
+#[allow(unused)]
 pub const SOCK_STREAM: i32 = 1;
+#[allow(unused)]
+pub const SOCK_DGRAM: i32 = 2;
 
 pub use psp::sys::in_addr;
 

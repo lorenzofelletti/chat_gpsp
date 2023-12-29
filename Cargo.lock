@@ -101,6 +101,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "chat_gpsp"
 version = "0.1.0"
 dependencies = [
+ "dns-protocol",
  "drogue-network",
  "embedded-io",
  "embedded-tls",
@@ -194,6 +195,15 @@ dependencies = [
  "block-buffer",
  "crypto-common",
  "subtle",
+]
+
+[[package]]
+name = "dns-protocol"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66656c8d846e5150766e33ead23c685281b77159f279f9ae73b6b9f197544a74"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -436,6 +446,12 @@ dependencies = [
  "autocfg",
  "scopeguard",
 ]
+
+[[package]]
+name = "memchr"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "523dc4f511e55ab87b694dc30d0f820d60906ef06413f93d4d7a1385599cc149"
 
 [[package]]
 name = "nb"

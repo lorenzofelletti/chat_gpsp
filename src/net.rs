@@ -6,8 +6,10 @@ use psp::sys;
 
 use core::ffi::c_void;
 
+pub mod dns;
 pub mod netc;
 pub mod resolver;
+pub mod udp;
 pub mod utils;
 
 #[derive(Clone, Copy)]

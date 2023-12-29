@@ -56,7 +56,7 @@ fn psp_main() {
 
     psp::dprintln!("Connected to network!");
 
-    let mut resolver = DnsResolver::new().expect("failed to create resolver");
+    let mut resolver = DnsResolver::default().expect("failed to create resolver");
 
     psp::dprintln!("Created resolver!");
 
