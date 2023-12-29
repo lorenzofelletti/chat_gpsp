@@ -1,11 +1,13 @@
 use alloc::{format, string::String};
-use drogue_network::addr::*;
-use drogue_tls::TlsError;
+use drogue_network::addr::{HostSocketAddr, SocketAddr};
+use embedded_io::ErrorType;
+use embedded_tls::TlsError;
 use psp::sys;
 
 use core::ffi::c_void;
 
 pub mod netc;
+pub mod resolver;
 pub mod utils;
 
 #[derive(Clone, Copy)]
@@ -92,16 +94,24 @@ impl Socket {
     }
 }
 
-impl drogue_tls::traits::Read for Socket {
+impl ErrorType for Socket {
+    type Error = TlsError;
+}
+
+impl embedded_io::Read for Socket {
     /// Read from the socket
     fn read<'m>(&'m mut self, buf: &'m mut [u8]) -> Result<usize, TlsError> {
         self._read(buf).map_err(|_| TlsError::InternalError)
     }
 }
 
-impl drogue_tls::traits::Write for Socket {
+impl embedded_io::Write for Socket {
     /// Write to the socket
     fn write<'m>(&'m mut self, buf: &'m [u8]) -> Result<usize, TlsError> {
         self._write(buf).map_err(|_| TlsError::InternalError)
+    }
+
+    fn flush(&mut self) -> Result<(), TlsError> {
+        Ok(())
     }
 }
