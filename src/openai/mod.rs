@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use regex::Regex;
 
 use crate::{
-    net::{resolver::DnsResolver, Socket},
+    net::{resolver::DnsResolver, socket::tcp::TcpSocket},
     openai::types::CompletionResponse,
 };
 use constants::*;
@@ -28,7 +28,7 @@ pub enum OpenAiError {
 }
 
 pub struct OpenAiContext<'a> {
-    tls_connection: TlsConnection<'a, Socket, Aes128GcmSha256>,
+    tls_connection: TlsConnection<'a, TcpSocket, Aes128GcmSha256>,
 }
 
 impl<'a> OpenAiContext<'a> {
@@ -48,7 +48,7 @@ impl<'a> OpenAiContext<'a> {
     where
         'b: 'a,
     {
-        let socket = Socket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
+        let socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
         Self::connect(&socket, resolver)?;
 
         let tls_config = TlsConfig::new().with_server_name(OPENAI_API_HOST);
@@ -63,7 +63,7 @@ impl<'a> OpenAiContext<'a> {
         Ok(OpenAiContext { tls_connection })
     }
 
-    fn connect(socket: &Socket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
+    fn connect(socket: &TcpSocket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
         let addr = resolver
             .resolve_with_google_dns(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;

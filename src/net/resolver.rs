@@ -2,30 +2,31 @@ use alloc::{format, string::String, vec as a_vec, vec::Vec};
 
 use dns_protocol::{Flags, ResourceRecord};
 use drogue_network::addr::HostSocketAddr;
+use embedded_io::{Read, Write};
 use psp::sys::in_addr;
 
-use super::dns::google_dns_host_socket_addr;
+use crate::net::socket::udp::UdpSocketState;
+
+use super::{dns::google_dns_host_socket_addr, socket::udp::UdpSocket};
 
 #[derive(Clone)]
 pub struct DnsResolver {
-    udp_socket: super::udp::UdpSocket,
+    udp_socket: UdpSocket,
 }
 
 impl DnsResolver {
     /// Create a new DNS resolver
     #[allow(unused)]
     pub fn new(host: HostSocketAddr) -> Result<Self, ()> {
-        let mut udp_socket = super::udp::UdpSocket::open()?;
+        let mut udp_socket = UdpSocket::open().map_err(|_| ())?;
         udp_socket.bind(Some(host)).map_err(|_| ())?;
 
         Ok(DnsResolver { udp_socket })
     }
 
     /// Create a new DNS resolver with default settings
-    ///
-    /// Bind to `localhost:1234`
     pub fn default() -> Result<Self, ()> {
-        let mut udp_socket = super::udp::UdpSocket::open()?;
+        let mut udp_socket = UdpSocket::open().map_err(|_| ())?;
         udp_socket.bind(None).map_err(|_| ())?;
 
         Ok(DnsResolver { udp_socket })
@@ -40,9 +41,14 @@ impl DnsResolver {
     /// - `Ok(in_addr)`: The IP address of the hostname
     /// - `Err(())`: If the hostname could not be resolved
     pub fn resolve(&mut self, host: &str, dns_server: HostSocketAddr) -> Result<in_addr, ()> {
-        let mut questions = [super::dns::create_a_type_query(host)];
+        // connect to the DNS server, if not already
+        if self.udp_socket.get_socket_state() != UdpSocketState::Connected {
+            self.udp_socket.connect(dns_server).map_err(|_| ())?;
+        }
 
-        let message = dns_protocol::Message::new(
+        // create a new query
+        let mut questions = [super::dns::create_a_type_query(host)];
+        let query = dns_protocol::Message::new(
             0x42,
             Flags::standard_query(),
             &mut questions,
@@ -52,21 +58,19 @@ impl DnsResolver {
         );
 
         // create a new buffer with the size of the message
-        let mut tx_buf = a_vec![0u8; message.space_needed()];
+        let mut tx_buf = a_vec![0u8; query.space_needed()];
         // serialize the message into the buffer
-        message.write(&mut tx_buf).map_err(|_| ())?;
+        query.write(&mut tx_buf).map_err(|_| ())?;
 
         psp::dprintln!("writing request to buffer");
 
         // send the message to the DNS server
-        let sent_bytes = self
-            .udp_socket
-            .write_to(&tx_buf, message.space_needed(), dns_server)?;
+        let sent_bytes = self.udp_socket.write(&tx_buf).map_err(|_| ())?;
 
         psp::dprintln!(
             "wrote {} bytes, of {} bytes",
             sent_bytes,
-            message.space_needed()
+            query.space_needed()
         );
 
         let mut rx_buf = [0u8; 1024];
@@ -74,7 +78,7 @@ impl DnsResolver {
         psp::dprintln!("reading response from buffer");
 
         // receive the response from the DNS server
-        let data_len = self.udp_socket.read(&mut rx_buf)?;
+        let data_len = self.udp_socket.read(&mut rx_buf).map_err(|_| ())?;
 
         psp::dprintln!("reading response from buffer");
 
@@ -131,11 +135,11 @@ impl DnsResolver {
     /// - A [String] representation of the [`in_addr`]
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// use psp::sys::in_addr;
     /// use crate::net::resolver::DnsResolver;
     ///
-    /// let mut resolver = DnsResolver::new().unwrap();
+    /// let mut resolver = DnsResolver::default().unwrap();
     /// let addr = resolver.resolve("google.com").unwrap();
     /// let addr_str = resolver.in_addr_to_string(addr);
     /// ```
