@@ -6,7 +6,7 @@ use rand_chacha::ChaCha20Rng;
 use regex::Regex;
 
 use crate::{
-    net::{resolver::DnsResolver, socket::tcp::TcpSocket},
+    net::{dns::DnsResolver, socket::tcp::TcpSocket},
     openai::types::CompletionResponse,
 };
 use constants::*;

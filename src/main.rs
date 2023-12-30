@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use net::resolver::DnsResolver;
+use net::dns::DnsResolver;
 use openai::{OpenAi, OpenAiContext};
 use osk::{
     prelude::{default_osk_data, default_osk_params},
@@ -15,7 +15,7 @@ use psp::sys::{sceGuTerm, sceKernelDcacheWritebackAll, sceKernelExitGame};
 
 use crate::{osk::setup_gu, utils::str_to_u16_mut_ptr};
 
-psp::module!("tls-test", 1, 1);
+psp::module!("chat-gpsp", 1, 1);
 
 mod net;
 mod openai;
