@@ -62,13 +62,20 @@ fn psp_main() {
 
     let rng = &mut OpenAiContext::create_rng();
 
-    let record_read_buf = &mut OpenAiContext::create_new_buf();
-    let record_write_buf = &mut OpenAiContext::create_new_buf();
-    let openai_context = OpenAiContext::new(&mut resolver, rng, record_read_buf, record_write_buf)
-        .expect("failed to create openai context");
-    let openai = OpenAi::new(OPENAI_API_KEY, openai_context).expect("failed to create openai");
+    let mut record_read_buf = OpenAiContext::create_new_buf();
+    let mut record_write_buf = OpenAiContext::create_new_buf();
+    let openai_context = OpenAiContext::new(
+        &mut resolver,
+        rng,
+        &mut record_read_buf,
+        &mut record_write_buf,
+    )
+    .expect("failed to create openai context");
+    let mut openai = OpenAi::new(OPENAI_API_KEY, openai_context).expect("failed to create openai");
 
     psp::dprintln!("Created openai context!");
+
+    openai.ask_gpt("Hello, world!").expect("failed to ask gpt");
 
     let read_text = unsafe {
         sceKernelDcacheWritebackAll();

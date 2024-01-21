@@ -1,5 +1,5 @@
 pub const OPENAI_API_HOST: &str = "api.openai.com";
-pub const PATH: &str = "/v1/chat/completions";
+pub const POST_PATH: &str = "/v1/chat/completions";
 pub const OPENAI_API_PORT: u16 = 443;
 pub const GPT3_MODEL: &str = "gpt-3.5-turbo";
 #[allow(unused)]

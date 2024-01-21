@@ -1,5 +1,6 @@
-use alloc::{borrow::ToOwned, format, string::String};
+use alloc::{borrow::ToOwned, format, string::{String, ToString}};
 use drogue_network::addr::HostSocketAddr;
+use embedded_io::Write;
 use embedded_tls::blocking::{Aes128GcmSha256, NoVerify, TlsConfig, TlsConnection, TlsContext};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -36,8 +37,10 @@ impl<'a> OpenAiContext<'a> {
     ///
     /// # Example
     /// ```no_run
-    /// let buf = &mut OpenAiContext::create_new_buf();
-    /// let openai_context = OpenAiContext::new(&mut resolver, buf).unwrap();
+    /// let mut read_buf = OpenAiContext::create_new_buf();
+    /// let mut write_buf = OpenAiContext::create_new_buf();
+    /// let rng = &mut OpenAiContext::create_rng();
+    /// let openai_context = OpenAiContext::new(&mut resolver, rng, &mut read_buf, &mut write_buf).unwrap();
     /// ```
     pub fn new<'b>(
         resolver: &'a mut DnsResolver,
@@ -51,14 +54,26 @@ impl<'a> OpenAiContext<'a> {
         let socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
         Self::connect(&socket, resolver)?;
 
-        let tls_config = TlsConfig::new().with_server_name(OPENAI_API_HOST);
+        let tls_config = TlsConfig::new()
+            .with_server_name(OPENAI_API_HOST)
+            .reset_max_fragment_length();
+
+        psp::dprintln!("created tls config");
+
         let tls_context = TlsContext::new(&tls_config, rng);
 
+        psp::dprintln!("created tls context");
+
         let mut tls_connection = TlsConnection::new(socket, record_read_buf, record_write_buf);
+
+        psp::dprintln!("created tls connection");
+        psp::dprintln!("opening tls connection");
 
         tls_connection
             .open::<ChaCha20Rng, NoVerify>(tls_context)
             .map_err(|_| OpenAiError::TlsError)?;
+
+        psp::dprintln!("opened tls connection");
 
         Ok(OpenAiContext { tls_connection })
     }
@@ -112,15 +127,14 @@ impl<'a> OpenAi<'a> {
         })
     }
 
-    pub fn ask_gpt(mut self, prompt: &str) -> Result<String, OpenAiError> {
+    pub fn ask_gpt(&mut self, prompt: &str) -> Result<String, OpenAiError> {
         self.history.add_user_message(prompt.to_owned());
 
-        let request_body = self.history.to_string();
-        let content_length = request_body.len();
+        let (request_body, content_length) = self.history.to_string_with_content_length();
 
         let request = format!(
-            "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            PATH,
+            "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nUser-Agent: Sony PSP\r\n\r\n{}\r\n",
+            POST_PATH,  
             OPENAI_API_HOST,
             self.api_key,
             content_length,
@@ -131,8 +145,9 @@ impl<'a> OpenAi<'a> {
 
         self.openai_context
             .tls_connection
-            .write(request_bytes)
+            .write_all(request_bytes)
             .map_err(|_| OpenAiError::TlsError)?;
+        self.openai_context.tls_connection.flush().map_err(|_| OpenAiError::TlsError)?;
 
         let response_buf = &mut [0u8; 16_384];
         self.openai_context
@@ -140,9 +155,11 @@ impl<'a> OpenAi<'a> {
             .read(response_buf)
             .map_err(|_| OpenAiError::TlsError)?;
 
-        let mut text = unsafe { alloc::string::String::from_utf8_unchecked(response_buf.to_vec()) };
+        let mut text = String::from_utf8_lossy(response_buf).to_string();
         text = text.replace("\r", "");
         text = text.replace("\0", "");
+
+        psp::dprintln!("{}", text);
 
         let res_code = text
             .split("\n")
