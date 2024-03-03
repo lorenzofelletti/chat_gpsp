@@ -54,6 +54,8 @@ impl TcpSocket {
                 let sin_addr = u32::from_le_bytes(octets);
                 let port = v4.port().to_be();
 
+                psp::dprintln!("AAAA Connecting to {}:{}", sin_addr, port.to_le());
+
                 let sockaddr_in = netc::sockaddr_in {
                     sin_len: core::mem::size_of::<netc::sockaddr_in>() as u8,
                     sin_family: netc::AF_INET,

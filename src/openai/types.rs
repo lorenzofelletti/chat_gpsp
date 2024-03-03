@@ -29,7 +29,7 @@ impl Message {
             .replace('\n', "\\n")
             .replace('\t', "\\t")
             .replace('\'', "\\'")
-            .replace('\"', "\\\""); // TODO: escape more characters
+            .replace('\"', "\\\"");
 
         format!(
             "{{\"role\": \"{}\", \"content\": \"{}\"}}",
@@ -89,16 +89,6 @@ impl ChatHistory {
     pub fn to_string_with_content_length(&self) -> (String, usize) {
         let string = self.to_string();
         let len = string.len();
-        // let mut len = string.len();
-
-        // for c in string.chars() {
-        //     // TODO: check if works
-        //     // hyp: format makes a string in which braces (that are escaped w/ '{{') counts a 2 bytes
-        //     // instead of one
-        //     if c == '{' || c == '}' {
-        //         len -= 1;
-        //     }
-        // }
 
         (string, len)
     }

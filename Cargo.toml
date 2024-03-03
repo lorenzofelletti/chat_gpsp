@@ -18,6 +18,9 @@ regex = { version = "1.10", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde-json-core = "0.5.1"
 nb = "1"
+lazy_static = { version = "1.4", default-features = false, features = [
+    "spin_no_std",
+] }
 
 [profile.release]
 lto = true

@@ -32,7 +32,7 @@ const CHAT_MAX_LENGTH: u16 = 128;
 #[allow(dead_code)]
 const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 
-const OPENAI_API_KEY: &'static str = core::env!("OPENAI_API_KEY");
+const OPENAI_API_KEY: &'static str = "vuvuzela"; // core::env!("OPENAI_API_KEY");
 
 #[no_mangle]
 fn psp_main() {
@@ -60,17 +60,11 @@ fn psp_main() {
 
     psp::dprintln!("Created resolver!");
 
-    let rng = &mut OpenAiContext::create_rng();
-
     let mut record_read_buf = OpenAiContext::create_new_buf();
     let mut record_write_buf = OpenAiContext::create_new_buf();
-    let openai_context = OpenAiContext::new(
-        &mut resolver,
-        rng,
-        &mut record_read_buf,
-        &mut record_write_buf,
-    )
-    .expect("failed to create openai context");
+    let openai_context =
+        OpenAiContext::new(&mut resolver, &mut record_read_buf, &mut record_write_buf)
+            .expect("failed to create openai context");
     let mut openai = OpenAi::new(OPENAI_API_KEY, openai_context).expect("failed to create openai");
 
     psp::dprintln!("Created openai context!");

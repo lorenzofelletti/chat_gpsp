@@ -1,13 +1,12 @@
 use alloc::{borrow::ToOwned, format, string::{String, ToString}};
 use drogue_network::addr::HostSocketAddr;
-use embedded_io::Write;
-use embedded_tls::blocking::{Aes128GcmSha256, NoVerify, TlsConfig, TlsConnection, TlsContext};
+
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use regex::Regex;
 
 use crate::{
-    net::{dns::DnsResolver, socket::tcp::TcpSocket},
+    net::{dns::DnsResolver, socket::{tcp::TcpSocket, tls::TlsSocket}},
     openai::types::CompletionResponse,
 };
 use constants::*;
@@ -29,7 +28,7 @@ pub enum OpenAiError {
 }
 
 pub struct OpenAiContext<'a> {
-    tls_connection: TlsConnection<'a, TcpSocket, Aes128GcmSha256>,
+    tls_socket: TlsSocket<'a>,
 }
 
 impl<'a> OpenAiContext<'a> {
@@ -39,12 +38,10 @@ impl<'a> OpenAiContext<'a> {
     /// ```no_run
     /// let mut read_buf = OpenAiContext::create_new_buf();
     /// let mut write_buf = OpenAiContext::create_new_buf();
-    /// let rng = &mut OpenAiContext::create_rng();
-    /// let openai_context = OpenAiContext::new(&mut resolver, rng, &mut read_buf, &mut write_buf).unwrap();
+    /// let openai_context = OpenAiContext::new(&mut resolver, &mut read_buf, &mut write_buf).unwrap();
     /// ```
     pub fn new<'b>(
         resolver: &'a mut DnsResolver,
-        rng: &'b mut ChaCha20Rng,
         record_read_buf: &'a mut [u8],
         record_write_buf: &'a mut [u8],
     ) -> Result<Self, OpenAiError>
@@ -52,30 +49,17 @@ impl<'a> OpenAiContext<'a> {
         'b: 'a,
     {
         let socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
+        psp::dprintln!("opened tcp socket");
         Self::connect(&socket, resolver)?;
+        psp::dprintln!("connected to openai");
 
-        let tls_config = TlsConfig::new()
-            .with_server_name(OPENAI_API_HOST)
-            .reset_max_fragment_length();
+        let mut tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf, OPENAI_API_HOST);
 
-        psp::dprintln!("created tls config");
-
-        let tls_context = TlsContext::new(&tls_config, rng);
-
-        psp::dprintln!("created tls context");
-
-        let mut tls_connection = TlsConnection::new(socket, record_read_buf, record_write_buf);
-
-        psp::dprintln!("created tls connection");
-        psp::dprintln!("opening tls connection");
-
-        tls_connection
-            .open::<ChaCha20Rng, NoVerify>(tls_context)
-            .map_err(|_| OpenAiError::TlsError)?;
+        tls_socket.open(Self::generate_seed()).map_err(|_| OpenAiError::TlsError)?;
 
         psp::dprintln!("opened tls connection");
 
-        Ok(OpenAiContext { tls_connection })
+        Ok(OpenAiContext { tls_socket})
     }
 
     fn connect(socket: &TcpSocket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
@@ -85,7 +69,7 @@ impl<'a> OpenAiContext<'a> {
 
         psp::dprintln!("resolved to {}", addr.0);
 
-        let remote = HostSocketAddr::from(&DnsResolver::in_addr_to_string(addr), OPENAI_API_PORT)
+        let remote = HostSocketAddr::from(&DnsResolver::in_addr_to_string(addr), HTTPS_PORT)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
 
         psp::dprintln!("connecting to {}", remote.addr().ip());
@@ -109,6 +93,14 @@ impl<'a> OpenAiContext<'a> {
             psp::sys::sceRtcGetCurrentTick(&mut seed);
         }
         ChaCha20Rng::seed_from_u64(seed)
+    }
+
+    pub fn generate_seed() -> u64 {
+        let mut seed = 0;
+        unsafe {
+            psp::sys::sceRtcGetCurrentTick(&mut seed);
+        }
+        seed
     }
 }
 
@@ -144,14 +136,14 @@ impl<'a> OpenAi<'a> {
         let request_bytes = request.as_bytes();
 
         self.openai_context
-            .tls_connection
+            .tls_socket
             .write_all(request_bytes)
             .map_err(|_| OpenAiError::TlsError)?;
-        self.openai_context.tls_connection.flush().map_err(|_| OpenAiError::TlsError)?;
+        self.openai_context.tls_socket.flush().map_err(|_| OpenAiError::TlsError)?;
 
         let response_buf = &mut [0u8; 16_384];
         self.openai_context
-            .tls_connection
+            .tls_socket
             .read(response_buf)
             .map_err(|_| OpenAiError::TlsError)?;
 
