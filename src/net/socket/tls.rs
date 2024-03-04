@@ -25,8 +25,9 @@ impl<'a> TlsSocket<'a> {
     ) -> Self {
         let tls_config: TlsConfig<'_, Aes128GcmSha256> = TlsConfig::new()
             .with_server_name(server_name)
-            .reset_max_fragment_length()
             .enable_rsa_signatures();
+        //.reset_max_fragment_length();
+        //.enable_rsa_signatures();
         let tls_connection: TlsConnection<TcpSocket, Aes128GcmSha256> =
             TlsConnection::new(socket, record_read_buf, record_write_buf);
 
@@ -36,8 +37,8 @@ impl<'a> TlsSocket<'a> {
         }
     }
 
-    pub fn new_buffer() -> [u8; 16_384] {
-        [0; 16_384]
+    fn new_buffer() -> [u8; 160_384] {
+        [0; 160_384]
     }
 
     pub fn open(&mut self, seed: u64) -> Result<(), embedded_tls::TlsError> {
@@ -49,6 +50,7 @@ impl<'a> TlsSocket<'a> {
         res
     }
 
+    #[allow(unused)]
     pub fn write(&mut self, buf: &[u8]) -> Result<usize, embedded_tls::TlsError> {
         self.tls_connection.write(buf)
     }
@@ -61,6 +63,7 @@ impl<'a> TlsSocket<'a> {
         self.tls_connection.read(buf)
     }
 
+    #[allow(unused)]
     pub fn read_string(&mut self) -> Result<String, embedded_tls::TlsError> {
         let mut buf = Self::new_buffer();
         let _ = self.read(&mut buf)?;

@@ -1,8 +1,6 @@
 use alloc::{borrow::ToOwned, format, string::{String, ToString}};
 use drogue_network::addr::HostSocketAddr;
 
-use rand::SeedableRng;
-use rand_chacha::ChaCha20Rng;
 use regex::Regex;
 
 use crate::{
@@ -83,16 +81,8 @@ impl<'a> OpenAiContext<'a> {
         Ok(())
     }
 
-    pub fn create_new_buf() -> [u8; 16_384] {
-        [0; 16_384]
-    }
-
-    pub fn create_rng() -> ChaCha20Rng {
-        let mut seed = 0;
-        unsafe {
-            psp::sys::sceRtcGetCurrentTick(&mut seed);
-        }
-        ChaCha20Rng::seed_from_u64(seed)
+    pub fn create_new_buf() -> [u8; 160_384] {
+        [0; 160_384]
     }
 
     pub fn generate_seed() -> u64 {
