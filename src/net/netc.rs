@@ -11,6 +11,7 @@ pub use psp::sys::sockaddr;
 
 #[repr(C)]
 #[allow(nonstandard_style)]
+// TODO: document
 pub struct sockaddr_in {
     pub sin_len: u8,
     pub sin_family: u8,

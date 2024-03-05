@@ -4,6 +4,8 @@
 
 extern crate alloc;
 
+use core::f32::consts::E;
+
 use alloc::vec::Vec;
 use net::dns::DnsResolver;
 use openai::{OpenAi, OpenAiContext};
@@ -13,7 +15,10 @@ use osk::{
 };
 use psp::sys::{sceGuTerm, sceKernelDcacheWritebackAll, sceKernelExitGame};
 
-use crate::{osk::setup_gu, utils::str_to_u16_mut_ptr};
+use crate::{
+    osk::setup_gu,
+    utils::{str_to_u16_mut_ptr, InputHandler},
+};
 
 psp::module!("chat-gpsp", 1, 1);
 
@@ -32,7 +37,7 @@ const CHAT_MAX_LENGTH: u16 = 128;
 #[allow(dead_code)]
 const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 
-const OPENAI_API_KEY: &'static str = "vuvuzela"; // core::env!("OPENAI_API_KEY");
+const OPENAI_API_KEY: &'static str = core::env!("OPENAI_API_KEY");
 
 #[no_mangle]
 fn psp_main() {
@@ -58,44 +63,48 @@ fn psp_main() {
 
     let mut resolver = DnsResolver::default().expect("failed to create resolver");
 
-    psp::dprintln!("Created resolver!");
-
     let mut record_read_buf = OpenAiContext::create_new_buf();
     let mut record_write_buf = OpenAiContext::create_new_buf();
     let openai_context =
         OpenAiContext::new(&mut resolver, &mut record_read_buf, &mut record_write_buf)
             .expect("failed to create openai context");
+
     let mut openai = OpenAi::new(OPENAI_API_KEY, openai_context).expect("failed to create openai");
 
-    psp::dprintln!("Created openai context!");
+    let mut input_handler = InputHandler::default();
 
-    openai.ask_gpt("Hello, world!").expect("failed to ask gpt");
+    setup_gu();
 
-    let read_text = unsafe {
-        sceKernelDcacheWritebackAll();
+    loop {
+        let read_text = unsafe {
+            sceKernelDcacheWritebackAll();
 
-        let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
-        let out_capacity: i32 = out_text.capacity() as i32;
+            let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
+            let out_capacity: i32 = out_text.capacity() as i32;
 
-        let description = str_to_u16_mut_ptr("Ask GPT\0");
-        let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
+            let description = str_to_u16_mut_ptr("Ask GPT\0");
+            let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
 
-        let params = &mut default_osk_params(&mut osk_data);
+            let params = &mut default_osk_params(&mut osk_data);
 
-        psp::dprintln!("starting osk...");
+            start_osk(params).expect("failed to start osk");
 
-        setup_gu();
+            read_from_osk(params).unwrap_or_default()
+        };
 
-        start_osk(params).expect("failed to start osk");
+        let answer = openai.ask_gpt(read_text.as_str());
 
-        read_from_osk(params).unwrap_or_default()
-    };
+        if answer.is_err() {
+            psp::dprintln!("failed to get answer from openai");
+        } else {
+            psp::dprintln!("GPT: {}", answer.unwrap());
+        }
 
-    psp::dprintln!("read_text: {:?}", read_text);
-
-    openai
-        .ask_gpt(read_text.as_str())
-        .expect("failed to ask gpt");
+        psp::dprintln!("Press X to exit");
+        if !input_handler.choose_continue() {
+            break;
+        }
+    }
 
     unsafe {
         sceGuTerm();

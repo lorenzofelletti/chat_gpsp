@@ -1,6 +1,7 @@
 use alloc::{borrow::ToOwned, format, string::{String, ToString}};
 use drogue_network::addr::HostSocketAddr;
 
+use embedded_tls::TlsError;
 use regex::Regex;
 
 use crate::{
@@ -46,21 +47,24 @@ impl<'a> OpenAiContext<'a> {
     where
         'b: 'a,
     {
-        let socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
+        let mut socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
         psp::dprintln!("opened tcp socket");
-        Self::connect(&socket, resolver)?;
+        Self::connect(&mut socket, resolver)?;
         psp::dprintln!("connected to openai");
 
-        let mut tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf, OPENAI_API_HOST);
+        let mut tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf, OPENAI_API_HOST, None);
 
-        tls_socket.open(Self::generate_seed()).map_err(|_| OpenAiError::TlsError)?;
+        tls_socket.open(Self::generate_seed()).map_err(|e| {
+            psp::dprintln!("tls error: {:?}", e);
+            OpenAiError::TlsError
+        })?;
 
         psp::dprintln!("opened tls connection");
 
         Ok(OpenAiContext { tls_socket})
     }
 
-    fn connect(socket: &TcpSocket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
+    fn connect(socket: &mut TcpSocket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
         let addr = resolver
             .resolve_with_google_dns(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
@@ -81,8 +85,8 @@ impl<'a> OpenAiContext<'a> {
         Ok(())
     }
 
-    pub fn create_new_buf() -> [u8; 160_384] {
-        [0; 160_384]
+    pub fn create_new_buf() -> [u8; 16_384] {
+        [0; 16_384]
     }
 
     pub fn generate_seed() -> u64 {
@@ -110,6 +114,14 @@ impl<'a> OpenAi<'a> {
     }
 
     pub fn ask_gpt(&mut self, prompt: &str) -> Result<String, OpenAiError> {
+        fn log_error(e: &TlsError, log: Option<&str>) -> OpenAiError {
+            if let Some(log) = log {
+                psp::dprintln!("{}", log);
+            }
+            psp::dprintln!("error: {:?}", e);
+            OpenAiError::TlsError
+        }
+
         self.history.add_user_message(prompt.to_owned());
 
         let (request_body, content_length) = self.history.to_string_with_content_length();
@@ -128,26 +140,26 @@ impl<'a> OpenAi<'a> {
         self.openai_context
             .tls_socket
             .write_all(request_bytes)
-            .map_err(|_| OpenAiError::TlsError)?;
-        self.openai_context.tls_socket.flush().map_err(|_| OpenAiError::TlsError)?;
+            .map_err(|e| log_error(&e, Some("write_all")))?;
+        self.openai_context.tls_socket.flush().map_err(|e| log_error(&e, Some("flush")))?;
 
         let response_buf = &mut [0u8; 16_384];
         self.openai_context
             .tls_socket
             .read(response_buf)
-            .map_err(|_| OpenAiError::TlsError)?;
+            .map_err(|e| log_error(&e, Some("read")))?;
 
         let mut text = String::from_utf8_lossy(response_buf).to_string();
-        text = text.replace("\r", "");
-        text = text.replace("\0", "");
+        text = text.replace('\r', "");
+        text = text.replace('\0', "");
 
         psp::dprintln!("{}", text);
 
         let res_code = text
-            .split("\n")
+            .split('\n')
             .next()
             .unwrap()
-            .split(" ")
+            .split(' ')
             .nth(1)
             .ok_or(OpenAiError::UnparsableResponseCode)?;
         if res_code != "200" {

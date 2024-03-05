@@ -1,5 +1,8 @@
 use alloc::{vec, vec::Vec};
-use psp::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use psp::{
+    sys::{self, CtrlButtons, SceCtrlData},
+    SCREEN_HEIGHT, SCREEN_WIDTH,
+};
 
 pub const BUF_WIDTH: u32 = 512;
 
@@ -64,4 +67,27 @@ pub unsafe fn mut_ptr_u16_to_vec_char(ptr: *mut u16, len: usize) -> Vec<char> {
         }
     }
     vec
+}
+
+/// Handles user input
+pub struct InputHandler {
+    pub buttons_to_continue: CtrlButtons,
+}
+
+impl InputHandler {
+    /// Create a new `InputHandler`
+    pub fn default() -> Self {
+        Self {
+            buttons_to_continue: CtrlButtons::CROSS,
+        }
+    }
+
+    pub fn choose_continue(&mut self) -> bool {
+        let mut pad_data = SceCtrlData::default();
+        unsafe {
+            sys::sceCtrlReadBufferPositive(&mut pad_data, 1);
+        }
+
+        pad_data.buttons.contains(CtrlButtons::CROSS)
+    }
 }

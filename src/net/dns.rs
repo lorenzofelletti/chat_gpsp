@@ -11,11 +11,11 @@ use super::socket::udp::UdpSocket;
 #[allow(unused)]
 pub const GOOGLE_DNS_HOST_ADDR: [u8; 4] = [8, 8, 8, 8];
 #[allow(unused)]
-pub const GOOGLE_DNS_HOST_PORT: u16 = 53;
+pub const DNS_PORT: u16 = 53;
 
 #[allow(unused)]
 pub fn google_dns_host_socket_addr() -> HostSocketAddr {
-    HostSocketAddr::new(HostAddr::ipv4(GOOGLE_DNS_HOST_ADDR), GOOGLE_DNS_HOST_PORT)
+    HostSocketAddr::new(HostAddr::ipv4(GOOGLE_DNS_HOST_ADDR), DNS_PORT)
 }
 
 #[allow(unused)]
@@ -24,6 +24,7 @@ pub fn create_a_type_query(domain: &str) -> Question {
     Question::new(domain, dns_protocol::ResourceType::A, 1)
 }
 
+// TODO: create trait for DNS resolver
 #[derive(Clone)]
 /// A DNS resolver
 pub struct DnsResolver {
@@ -78,25 +79,13 @@ impl DnsResolver {
         // serialize the message into the buffer
         query.write(&mut tx_buf).map_err(|_| ())?;
 
-        psp::dprintln!("writing request to buffer");
-
         // send the message to the DNS server
         let sent_bytes = self.udp_socket.write(&tx_buf).map_err(|_| ())?;
 
-        psp::dprintln!(
-            "wrote {} bytes, of {} bytes",
-            sent_bytes,
-            query.space_needed()
-        );
-
         let mut rx_buf = [0u8; 1024];
-
-        psp::dprintln!("reading response from buffer");
 
         // receive the response from the DNS server
         let data_len = self.udp_socket.read(&mut rx_buf).map_err(|_| ())?;
-
-        psp::dprintln!("reading response from buffer");
 
         if data_len == 0 {
             return Err(());
@@ -115,10 +104,7 @@ impl DnsResolver {
         )
         .map_err(|_| ())?;
 
-        psp::dprintln!("message parsed");
-
-        psp::dprintln!("answer: {:?}", message.answers());
-        if message.answers().len() < 1 {
+        if message.answers().is_empty() {
             return Err(());
         }
         let answer = message.answers()[0];
@@ -128,7 +114,6 @@ impl DnsResolver {
                 let mut octets = [0u8; 4];
                 octets.copy_from_slice(answer.data());
                 let addr = in_addr(u32::from_le_bytes(octets));
-                psp::dprintln!("addr: {}", addr.0);
                 Ok(addr)
             }
             _ => Err(()),

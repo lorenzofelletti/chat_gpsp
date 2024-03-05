@@ -249,6 +249,7 @@ impl embedded_io::Write for UdpSocket {
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
+        // FIXME: implement
         Ok(())
     }
 }

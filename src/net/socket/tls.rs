@@ -1,6 +1,8 @@
 use alloc::string::String;
 use embedded_io::Write;
-use embedded_tls::{blocking::TlsConnection, Aes128GcmSha256, NoVerify, TlsConfig, TlsContext};
+use embedded_tls::{
+    blocking::TlsConnection, Aes128GcmSha256, Certificate, NoVerify, TlsConfig, TlsContext,
+};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use regex::Regex;
@@ -22,12 +24,18 @@ impl<'a> TlsSocket<'a> {
         record_read_buf: &'a mut [u8],
         record_write_buf: &'a mut [u8],
         server_name: &'a str,
+        cert: Option<&'a [u8]>,
     ) -> Self {
-        let tls_config: TlsConfig<'_, Aes128GcmSha256> = TlsConfig::new()
-            .with_server_name(server_name)
-            .enable_rsa_signatures();
-        //.reset_max_fragment_length();
-        //.enable_rsa_signatures();
+        let tls_config: TlsConfig<'_, Aes128GcmSha256> = match cert {
+            Some(cert) => TlsConfig::new()
+                .with_server_name(server_name)
+                .with_cert(Certificate::RawPublicKey(cert))
+                .enable_rsa_signatures(),
+            None => TlsConfig::new()
+                .with_server_name(server_name)
+                .enable_rsa_signatures(),
+        };
+
         let tls_connection: TlsConnection<TcpSocket, Aes128GcmSha256> =
             TlsConnection::new(socket, record_read_buf, record_write_buf);
 
@@ -37,17 +45,15 @@ impl<'a> TlsSocket<'a> {
         }
     }
 
-    fn new_buffer() -> [u8; 160_384] {
-        [0; 160_384]
+    fn new_buffer() -> [u8; 16_384] {
+        [0; 16_384]
     }
 
     pub fn open(&mut self, seed: u64) -> Result<(), embedded_tls::TlsError> {
         let mut rng = ChaCha20Rng::seed_from_u64(seed);
         let tls_context = TlsContext::new(&self.tls_config, &mut rng);
-        let res = self
-            .tls_connection
-            .open::<ChaCha20Rng, NoVerify>(tls_context);
-        res
+        self.tls_connection
+            .open::<ChaCha20Rng, NoVerify>(tls_context)
     }
 
     #[allow(unused)]
