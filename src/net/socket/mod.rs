@@ -5,6 +5,7 @@ use super::netc;
 
 pub mod error;
 pub mod tcp;
+pub mod tls;
 pub mod udp;
 
 #[allow(unused)]

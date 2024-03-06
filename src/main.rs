@@ -13,7 +13,10 @@ use osk::{
 };
 use psp::sys::{sceGuTerm, sceKernelDcacheWritebackAll, sceKernelExitGame};
 
-use crate::{osk::setup_gu, utils::str_to_u16_mut_ptr};
+use crate::{
+    osk::setup_gu,
+    utils::{str_to_u16_mut_ptr, InputHandler},
+};
 
 psp::module!("chat-gpsp", 1, 1);
 
@@ -32,13 +35,14 @@ const CHAT_MAX_LENGTH: u16 = 128;
 #[allow(dead_code)]
 const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 
-const OPENAI_API_KEY: &'static str = core::env!("OPENAI_API_KEY");
+const OPENAI_API_KEY: &str = core::env!("OPENAI_API_KEY");
 
 #[no_mangle]
 fn psp_main() {
     psp::enable_home_button();
 
     unsafe {
+        // setup network
         net::utils::load_net_modules();
         psp::dprintln!("Initializing network...");
         net::utils::net_init();
@@ -52,49 +56,68 @@ fn psp_main() {
             }
             psp::sys::sceKernelDelayThread(50_000);
         }
+
+        // setup controls
+        psp::sys::sceCtrlSetSamplingCycle(0);
+        psp::sys::sceCtrlSetSamplingMode(psp::sys::CtrlMode::Analog);
     }
 
     psp::dprintln!("Connected to network!");
 
     let mut resolver = DnsResolver::default().expect("failed to create resolver");
 
-    psp::dprintln!("Created resolver!");
+    let openai_context =
+        OpenAiContext::new(&mut resolver, OPENAI_API_KEY).expect("failed to create openai context");
 
-    let rng = &mut OpenAiContext::create_rng();
+    let mut input_handler = InputHandler::default();
 
-    let record_read_buf = &mut OpenAiContext::create_new_buf();
-    let record_write_buf = &mut OpenAiContext::create_new_buf();
-    let openai_context = OpenAiContext::new(&mut resolver, rng, record_read_buf, record_write_buf)
-        .expect("failed to create openai context");
-    let openai = OpenAi::new(OPENAI_API_KEY, openai_context).expect("failed to create openai");
+    psp::dprintln!("Press X to start asking GPT-3.5, any other button to exit.");
+    if !input_handler.choose_continue() {
+        unsafe {
+            psp::dprintln!("Exiting...");
+            sceGuTerm();
+            sceKernelExitGame();
+        };
+    }
 
-    psp::dprintln!("Created openai context!");
+    setup_gu();
 
-    let read_text = unsafe {
-        sceKernelDcacheWritebackAll();
+    loop {
+        let read_text = unsafe {
+            sceKernelDcacheWritebackAll();
 
-        let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
-        let out_capacity: i32 = out_text.capacity() as i32;
+            let mut out_text: Vec<u16> = Vec::with_capacity(CHAT_MAX_LENGTH_USIZE);
+            let out_capacity: i32 = out_text.capacity() as i32;
 
-        let description = str_to_u16_mut_ptr("Ask GPT\0");
-        let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
+            let description = str_to_u16_mut_ptr("Ask GPT\0");
+            let mut osk_data = default_osk_data(description, out_capacity, out_text.as_mut_ptr());
 
-        let params = &mut default_osk_params(&mut osk_data);
+            let params = &mut default_osk_params(&mut osk_data);
 
-        psp::dprintln!("starting osk...");
+            start_osk(params).expect("failed to start osk");
 
-        setup_gu();
+            read_from_osk(params).unwrap_or_default()
+        };
+        let read_text = read_text.replace('\0', "");
 
-        start_osk(params).expect("failed to start osk");
+        psp::dprintln!("User: {}", read_text);
 
-        read_from_osk(params).unwrap_or_default()
-    };
+        let mut openai = OpenAi::new(&openai_context).expect("failed to create openai");
 
-    psp::dprintln!("read_text: {:?}", read_text);
+        let answer = openai.ask_gpt(read_text.as_str());
 
-    openai
-        .ask_gpt(read_text.as_str())
-        .expect("failed to ask gpt");
+        if answer.is_err() {
+            psp::dprintln!("failed to get answer from openai");
+            psp::dprintln!("Got error: {:?}", answer.err().unwrap());
+        } else {
+            psp::dprintln!("GPT: {}", answer.unwrap());
+        }
+
+        psp::dprintln!("Press X to ask again, any other button to exit.");
+        if !input_handler.choose_continue() {
+            break;
+        }
+    }
 
     unsafe {
         sceGuTerm();

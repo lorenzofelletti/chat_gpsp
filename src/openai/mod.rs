@@ -1,12 +1,18 @@
-use alloc::{borrow::ToOwned, format, string::String};
-use drogue_network::addr::HostSocketAddr;
-use embedded_tls::blocking::{Aes128GcmSha256, NoVerify, TlsConfig, TlsConnection, TlsContext};
-use rand::SeedableRng;
-use rand_chacha::ChaCha20Rng;
-use regex::Regex;
+use alloc::{
+    borrow::ToOwned,
+    format,
+    string::{String, ToString},
+};
+use drogue_network::addr::{HostAddr, HostSocketAddr};
+
+use embedded_tls::TlsError;
+use psp::sys::in_addr;
 
 use crate::{
-    net::{dns::DnsResolver, socket::tcp::TcpSocket},
+    net::{
+        dns::DnsResolver,
+        socket::{tcp::TcpSocket, tls::TlsSocket},
+    },
     openai::types::CompletionResponse,
 };
 use constants::*;
@@ -16,158 +22,195 @@ use self::types::ChatHistory;
 pub mod constants;
 pub mod types;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenAiError {
     CannotOpenSocket,
     CannotResolveHost,
     CannotConnect,
-    TlsError,
+    TlsError(String),
     UnparsableResponseCode,
-    UnparsableResponseBody,
+    UnparsableResponseBody(String),
     ResponseCodeNotOk,
 }
 
-pub struct OpenAiContext<'a> {
-    tls_connection: TlsConnection<'a, TcpSocket, Aes128GcmSha256>,
+pub struct OpenAiContext {
+    remote: in_addr,
+    api_key: String,
 }
 
-impl<'a> OpenAiContext<'a> {
+impl OpenAiContext {
     /// Create a new OpenAI context
     ///
     /// # Example
     /// ```no_run
-    /// let buf = &mut OpenAiContext::create_new_buf();
-    /// let openai_context = OpenAiContext::new(&mut resolver, buf).unwrap();
+    /// let openai_context = OpenAiContext::new(&mut resolver, "my_api_key").unwrap();
     /// ```
-    pub fn new<'b>(
-        resolver: &'a mut DnsResolver,
-        rng: &'b mut ChaCha20Rng,
-        record_read_buf: &'a mut [u8],
-        record_write_buf: &'a mut [u8],
-    ) -> Result<Self, OpenAiError>
-    where
-        'b: 'a,
-    {
-        let socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
-        Self::connect(&socket, resolver)?;
+    pub fn new(resolver: &mut DnsResolver, api_key: &str) -> Result<Self, OpenAiError> {
+        let api_key = api_key.to_owned();
 
-        let tls_config = TlsConfig::new().with_server_name(OPENAI_API_HOST);
-        let tls_context = TlsContext::new(&tls_config, rng);
-
-        let mut tls_connection = TlsConnection::new(socket, record_read_buf, record_write_buf);
-
-        tls_connection
-            .open::<ChaCha20Rng, NoVerify>(tls_context)
-            .map_err(|_| OpenAiError::TlsError)?;
-
-        Ok(OpenAiContext { tls_connection })
-    }
-
-    fn connect(socket: &TcpSocket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
-        let addr = resolver
+        let remote = resolver
             .resolve_with_google_dns(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
 
-        psp::dprintln!("resolved to {}", addr.0);
-
-        let remote = HostSocketAddr::from(&DnsResolver::in_addr_to_string(addr), OPENAI_API_PORT)
-            .map_err(|_| OpenAiError::CannotResolveHost)?;
-
-        psp::dprintln!("connecting to {}", remote.addr().ip());
-
-        socket
-            .connect(remote)
-            .map_err(|_| OpenAiError::CannotConnect)?;
-
-        psp::dprintln!("connected");
-
-        Ok(())
-    }
-
-    pub fn create_new_buf() -> [u8; 16_384] {
-        [0; 16_384]
-    }
-
-    pub fn create_rng() -> ChaCha20Rng {
-        let mut seed = 0;
-        unsafe {
-            psp::sys::sceRtcGetCurrentTick(&mut seed);
+        // check if remote is valid
+        let try_remote = HostSocketAddr::from(
+            &DnsResolver::in_addr_to_string(in_addr(remote.0)),
+            HTTPS_PORT,
+        );
+        if try_remote.is_err() {
+            return Err(OpenAiError::CannotResolveHost);
         }
-        ChaCha20Rng::seed_from_u64(seed)
+
+        Ok(OpenAiContext { remote, api_key })
+    }
+
+    pub fn api_key(&self) -> String {
+        self.api_key.clone()
+    }
+
+    pub fn remote(&self) -> HostSocketAddr {
+        HostSocketAddr::from(
+            &DnsResolver::in_addr_to_string(in_addr(self.remote.0)),
+            HTTPS_PORT,
+        )
+        .unwrap()
     }
 }
 
-pub struct OpenAi<'a> {
+pub struct OpenAi {
+    remote: HostSocketAddr,
     api_key: String,
-    openai_context: OpenAiContext<'a>,
     history: ChatHistory,
 }
 
-impl<'a> OpenAi<'a> {
-    pub fn new(api_key: &str, openai_context: OpenAiContext<'a>) -> Result<Self, OpenAiError> {
+impl OpenAi {
+    pub fn new(openai_context: &OpenAiContext) -> Result<Self, OpenAiError> {
         Ok(OpenAi {
-            api_key: api_key.to_owned(),
-            openai_context,
+            remote: openai_context.remote(),
+            api_key: openai_context.api_key(),
             history: ChatHistory::new_gpt3(0.7),
         })
     }
 
-    pub fn ask_gpt(mut self, prompt: &str) -> Result<String, OpenAiError> {
+    pub fn ask_gpt(&mut self, prompt: &str) -> Result<String, OpenAiError> {
+        fn log_error(e: &TlsError) -> OpenAiError {
+            OpenAiError::TlsError(format!("{:?}", e))
+        }
+
         self.history.add_user_message(prompt.to_owned());
 
-        let request_body = self.history.to_string();
-        let content_length = request_body.len();
+        let (request_body, content_length) = self.history.to_string_with_content_length();
+
+        let mut read_buf = Self::create_new_buf();
+        let mut write_buf = Self::create_new_buf();
+
+        // get tls socket
+        let mut tls_socket =
+            Self::open_tls_socket(&mut read_buf, &mut write_buf, self.clone_remote())?;
 
         let request = format!(
-            "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            PATH,
+            "POST {} HTTP/1.1\nHost: {}\nAuthorization: Bearer {}\nContent-Type: application/json\nContent-Length: {}\nUser-Agent: Sony PSP\n\n{}\n",
+            POST_PATH,
             OPENAI_API_HOST,
             self.api_key,
             content_length,
             request_body,
         );
-
         let request_bytes = request.as_bytes();
 
-        self.openai_context
-            .tls_connection
-            .write(request_bytes)
-            .map_err(|_| OpenAiError::TlsError)?;
+        let mut response_string = String::new();
 
-        let response_buf = &mut [0u8; 16_384];
-        self.openai_context
-            .tls_connection
-            .read(response_buf)
-            .map_err(|_| OpenAiError::TlsError)?;
+        for _ in 1..=MAX_RETRIES {
+            tls_socket
+                .write_all(request_bytes)
+                .map_err(|e| log_error(&e))?;
 
-        let mut text = unsafe { alloc::string::String::from_utf8_unchecked(response_buf.to_vec()) };
-        text = text.replace("\r", "");
-        text = text.replace("\0", "");
+            tls_socket.flush().map_err(|e| log_error(&e))?;
 
-        let res_code = text
-            .split("\n")
-            .next()
-            .unwrap()
-            .split(" ")
-            .nth(1)
-            .ok_or(OpenAiError::UnparsableResponseCode)?;
-        if res_code != "200" {
-            return Err(OpenAiError::ResponseCodeNotOk);
+            let response_buf = &mut [0u8; 16_384];
+            tls_socket.read(response_buf).map_err(|e| log_error(&e))?;
+
+            let mut text = String::from_utf8_lossy(response_buf).to_string();
+            text = text.replace('\r', "");
+            text = text.replace('\0', "");
+
+            response_string += &text;
+
+            let res_code = response_string
+                .split('\n')
+                .next()
+                .ok_or(OpenAiError::UnparsableResponseCode)?
+                .split(' ')
+                .nth(1)
+                .ok_or(OpenAiError::UnparsableResponseCode)?;
+            if res_code != "200" {
+                return Err(OpenAiError::ResponseCodeNotOk);
+            }
+
+            if response_string.ends_with("}\n") {
+                break;
+            }
         }
 
-        let res_body = Regex::new(r"\{.*\}")
-            .unwrap()
-            .find(&text)
-            .ok_or(OpenAiError::UnparsableResponseBody)?
-            .as_str();
+        // find for double newline, get the body
+        let res_body =
+            response_string
+                .split("\n\n")
+                .nth(1)
+                .ok_or(OpenAiError::UnparsableResponseBody(
+                    "Body not found".to_owned(),
+                ))?;
+
         let completion_response: CompletionResponse = serde_json_core::from_str(res_body)
-            .map_err(|_| OpenAiError::UnparsableResponseBody)?
+            .map_err(|e| OpenAiError::UnparsableResponseBody(e.to_string()))?
             .0;
 
         let assistant_message = completion_response.choices[0].message.content.trim();
         self.history
             .add_assistant_message(assistant_message.to_owned());
 
-        todo!()
+        Ok(assistant_message.to_owned())
+    }
+
+    pub fn clone_remote(&self) -> HostSocketAddr {
+        let ip = self.remote.addr().ip();
+        let addr: HostAddr = HostAddr::from(ip);
+        HostSocketAddr::new(addr, self.remote.port())
+    }
+
+    fn open_tls_socket<'b>(
+        record_read_buf: &'b mut [u8],
+        record_write_buf: &'b mut [u8],
+        remote: HostSocketAddr,
+    ) -> Result<TlsSocket<'b>, OpenAiError> {
+        let mut socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
+        socket
+            .connect(remote)
+            .map_err(|_| OpenAiError::CannotConnect)?;
+
+        let mut tls_socket = TlsSocket::new(
+            socket,
+            record_read_buf,
+            record_write_buf,
+            OPENAI_API_HOST,
+            None,
+        );
+
+        tls_socket
+            .open(Self::generate_seed())
+            .map_err(|e| OpenAiError::TlsError(format!("{:?}", e)))?;
+        Ok(tls_socket)
+    }
+
+    pub fn create_new_buf() -> [u8; 16_384] {
+        [0; 16_384]
+    }
+
+    pub fn generate_seed() -> u64 {
+        let mut seed = 0;
+        unsafe {
+            psp::sys::sceRtcGetCurrentTick(&mut seed);
+        }
+        seed
     }
 }

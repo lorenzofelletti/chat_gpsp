@@ -29,7 +29,7 @@ impl Message {
             .replace('\n', "\\n")
             .replace('\t', "\\t")
             .replace('\'', "\\'")
-            .replace('\"', "\\\""); // TODO: escape more characters
+            .replace('\"', "\\\"");
 
         format!(
             "{{\"role\": \"{}\", \"content\": \"{}\"}}",
@@ -81,9 +81,16 @@ impl ChatHistory {
         messages.pop(); // remove last comma
 
         format!(
-            "{{\r\n  \"model\": \"{}\",\r\n  \"messages\": [{}],\r\n  \"temperature\": {},\r\n}}",
+            "{{\n  \"model\": \"{}\",\n  \"messages\": [{}],\n  \"temperature\": {},\n  \"stream\": false\n}}",
             self.model, messages, self.temperature,
         )
+    }
+
+    pub fn to_string_with_content_length(&self) -> (String, usize) {
+        let string = self.to_string();
+        let len = string.len();
+
+        (string, len)
     }
 }
 
