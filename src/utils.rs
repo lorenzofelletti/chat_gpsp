@@ -70,22 +70,30 @@ pub unsafe fn mut_ptr_u16_to_vec_char(ptr: *mut u16, len: usize) -> Vec<char> {
 }
 
 /// Handles user input
+#[derive(Debug, Clone, Copy)]
 pub struct InputHandler {
     pub buttons_to_continue: CtrlButtons,
 }
 
-impl InputHandler {
-    /// Create a new `InputHandler`
-    pub fn default() -> Self {
+impl core::default::Default for InputHandler {
+    /// Create a new `InputHandler` with default settings.
+    ///
+    /// By default, the `buttons_to_continue` field is set to [`CtrlButtons::CROSS`].
+    fn default() -> Self {
         Self {
             buttons_to_continue: CtrlButtons::CROSS,
         }
     }
+}
 
+impl InputHandler {
     pub fn choose_continue(&mut self) -> bool {
         let mut pad_data = SceCtrlData::default();
-        unsafe {
-            sys::sceCtrlReadBufferPositive(&mut pad_data, 1);
+
+        while pad_data.buttons.is_empty() {
+            unsafe {
+                sys::sceCtrlPeekBufferPositive(&mut pad_data, 1);
+            }
         }
 
         pad_data.buttons.contains(CtrlButtons::CROSS)

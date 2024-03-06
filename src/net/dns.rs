@@ -80,7 +80,7 @@ impl DnsResolver {
         query.write(&mut tx_buf).map_err(|_| ())?;
 
         // send the message to the DNS server
-        let sent_bytes = self.udp_socket.write(&tx_buf).map_err(|_| ())?;
+        let _ = self.udp_socket.write(&tx_buf).map_err(|_| ())?;
 
         let mut rx_buf = [0u8; 1024];
 

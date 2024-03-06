@@ -1,11 +1,18 @@
-use alloc::{borrow::ToOwned, format, string::{String, ToString}};
-use drogue_network::addr::HostSocketAddr;
+use alloc::{
+    borrow::ToOwned,
+    format,
+    string::{String, ToString},
+};
+use drogue_network::addr::{HostAddr, HostSocketAddr};
 
 use embedded_tls::TlsError;
-use regex::Regex;
+use psp::sys::in_addr;
 
 use crate::{
-    net::{dns::DnsResolver, socket::{tcp::TcpSocket, tls::TlsSocket}},
+    net::{
+        dns::DnsResolver,
+        socket::{tcp::TcpSocket, tls::TlsSocket},
+    },
     openai::types::CompletionResponse,
 };
 use constants::*;
@@ -15,74 +22,184 @@ use self::types::ChatHistory;
 pub mod constants;
 pub mod types;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenAiError {
     CannotOpenSocket,
     CannotResolveHost,
     CannotConnect,
-    TlsError,
+    TlsError(String),
     UnparsableResponseCode,
-    UnparsableResponseBody,
+    UnparsableResponseBody(String),
     ResponseCodeNotOk,
 }
 
-pub struct OpenAiContext<'a> {
-    tls_socket: TlsSocket<'a>,
+pub struct OpenAiContext {
+    remote: in_addr,
+    api_key: String,
 }
 
-impl<'a> OpenAiContext<'a> {
+impl OpenAiContext {
     /// Create a new OpenAI context
     ///
     /// # Example
     /// ```no_run
-    /// let mut read_buf = OpenAiContext::create_new_buf();
-    /// let mut write_buf = OpenAiContext::create_new_buf();
-    /// let openai_context = OpenAiContext::new(&mut resolver, &mut read_buf, &mut write_buf).unwrap();
+    /// let openai_context = OpenAiContext::new(&mut resolver, "my_api_key").unwrap();
     /// ```
-    pub fn new<'b>(
-        resolver: &'a mut DnsResolver,
-        record_read_buf: &'a mut [u8],
-        record_write_buf: &'a mut [u8],
-    ) -> Result<Self, OpenAiError>
-    where
-        'b: 'a,
-    {
-        let mut socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
-        psp::dprintln!("opened tcp socket");
-        Self::connect(&mut socket, resolver)?;
-        psp::dprintln!("connected to openai");
+    pub fn new(resolver: &mut DnsResolver, api_key: &str) -> Result<Self, OpenAiError> {
+        let api_key = api_key.to_owned();
 
-        let mut tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf, OPENAI_API_HOST, None);
-
-        tls_socket.open(Self::generate_seed()).map_err(|e| {
-            psp::dprintln!("tls error: {:?}", e);
-            OpenAiError::TlsError
-        })?;
-
-        psp::dprintln!("opened tls connection");
-
-        Ok(OpenAiContext { tls_socket})
-    }
-
-    fn connect(socket: &mut TcpSocket, resolver: &mut DnsResolver) -> Result<(), OpenAiError> {
-        let addr = resolver
+        let remote = resolver
             .resolve_with_google_dns(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
 
-        psp::dprintln!("resolved to {}", addr.0);
+        // check if remote is valid
+        let try_remote = HostSocketAddr::from(
+            &DnsResolver::in_addr_to_string(in_addr(remote.0)),
+            HTTPS_PORT,
+        );
+        if try_remote.is_err() {
+            return Err(OpenAiError::CannotResolveHost);
+        }
 
-        let remote = HostSocketAddr::from(&DnsResolver::in_addr_to_string(addr), HTTPS_PORT)
-            .map_err(|_| OpenAiError::CannotResolveHost)?;
+        Ok(OpenAiContext { remote, api_key })
+    }
 
-        psp::dprintln!("connecting to {}", remote.addr().ip());
+    pub fn api_key(&self) -> String {
+        self.api_key.clone()
+    }
 
+    pub fn remote(&self) -> HostSocketAddr {
+        HostSocketAddr::from(
+            &DnsResolver::in_addr_to_string(in_addr(self.remote.0)),
+            HTTPS_PORT,
+        )
+        .unwrap()
+    }
+}
+
+pub struct OpenAi {
+    remote: HostSocketAddr,
+    api_key: String,
+    history: ChatHistory,
+}
+
+impl OpenAi {
+    pub fn new(openai_context: &OpenAiContext) -> Result<Self, OpenAiError> {
+        Ok(OpenAi {
+            remote: openai_context.remote(),
+            api_key: openai_context.api_key(),
+            history: ChatHistory::new_gpt3(0.7),
+        })
+    }
+
+    pub fn ask_gpt(&mut self, prompt: &str) -> Result<String, OpenAiError> {
+        fn log_error(e: &TlsError) -> OpenAiError {
+            OpenAiError::TlsError(format!("{:?}", e))
+        }
+
+        self.history.add_user_message(prompt.to_owned());
+
+        let (request_body, content_length) = self.history.to_string_with_content_length();
+
+        let mut read_buf = Self::create_new_buf();
+        let mut write_buf = Self::create_new_buf();
+
+        // get tls socket
+        let mut tls_socket =
+            Self::open_tls_socket(&mut read_buf, &mut write_buf, self.clone_remote())?;
+
+        let request = format!(
+            "POST {} HTTP/1.1\nHost: {}\nAuthorization: Bearer {}\nContent-Type: application/json\nContent-Length: {}\nUser-Agent: Sony PSP\n\n{}\n",
+            POST_PATH,
+            OPENAI_API_HOST,
+            self.api_key,
+            content_length,
+            request_body,
+        );
+        let request_bytes = request.as_bytes();
+
+        let mut response_string = String::new();
+
+        for _ in 1..=MAX_RETRIES {
+            tls_socket
+                .write_all(request_bytes)
+                .map_err(|e| log_error(&e))?;
+
+            tls_socket.flush().map_err(|e| log_error(&e))?;
+
+            let response_buf = &mut [0u8; 16_384];
+            tls_socket.read(response_buf).map_err(|e| log_error(&e))?;
+
+            let mut text = String::from_utf8_lossy(response_buf).to_string();
+            text = text.replace('\r', "");
+            text = text.replace('\0', "");
+
+            response_string += &text;
+
+            let res_code = response_string
+                .split('\n')
+                .next()
+                .ok_or(OpenAiError::UnparsableResponseCode)?
+                .split(' ')
+                .nth(1)
+                .ok_or(OpenAiError::UnparsableResponseCode)?;
+            if res_code != "200" {
+                return Err(OpenAiError::ResponseCodeNotOk);
+            }
+
+            if response_string.ends_with("}\n") {
+                break;
+            }
+        }
+
+        // find for double newline, get the body
+        let res_body =
+            response_string
+                .split("\n\n")
+                .nth(1)
+                .ok_or(OpenAiError::UnparsableResponseBody(
+                    "Body not found".to_owned(),
+                ))?;
+
+        let completion_response: CompletionResponse = serde_json_core::from_str(res_body)
+            .map_err(|e| OpenAiError::UnparsableResponseBody(e.to_string()))?
+            .0;
+
+        let assistant_message = completion_response.choices[0].message.content.trim();
+        self.history
+            .add_assistant_message(assistant_message.to_owned());
+
+        Ok(assistant_message.to_owned())
+    }
+
+    pub fn clone_remote(&self) -> HostSocketAddr {
+        let ip = self.remote.addr().ip();
+        let addr: HostAddr = HostAddr::from(ip);
+        HostSocketAddr::new(addr, self.remote.port())
+    }
+
+    fn open_tls_socket<'b>(
+        record_read_buf: &'b mut [u8],
+        record_write_buf: &'b mut [u8],
+        remote: HostSocketAddr,
+    ) -> Result<TlsSocket<'b>, OpenAiError> {
+        let mut socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
         socket
             .connect(remote)
             .map_err(|_| OpenAiError::CannotConnect)?;
 
-        psp::dprintln!("connected");
+        let mut tls_socket = TlsSocket::new(
+            socket,
+            record_read_buf,
+            record_write_buf,
+            OPENAI_API_HOST,
+            None,
+        );
 
-        Ok(())
+        tls_socket
+            .open(Self::generate_seed())
+            .map_err(|e| OpenAiError::TlsError(format!("{:?}", e)))?;
+        Ok(tls_socket)
     }
 
     pub fn create_new_buf() -> [u8; 16_384] {
@@ -95,90 +212,5 @@ impl<'a> OpenAiContext<'a> {
             psp::sys::sceRtcGetCurrentTick(&mut seed);
         }
         seed
-    }
-}
-
-pub struct OpenAi<'a> {
-    api_key: String,
-    openai_context: OpenAiContext<'a>,
-    history: ChatHistory,
-}
-
-impl<'a> OpenAi<'a> {
-    pub fn new(api_key: &str, openai_context: OpenAiContext<'a>) -> Result<Self, OpenAiError> {
-        Ok(OpenAi {
-            api_key: api_key.to_owned(),
-            openai_context,
-            history: ChatHistory::new_gpt3(0.7),
-        })
-    }
-
-    pub fn ask_gpt(&mut self, prompt: &str) -> Result<String, OpenAiError> {
-        fn log_error(e: &TlsError, log: Option<&str>) -> OpenAiError {
-            if let Some(log) = log {
-                psp::dprintln!("{}", log);
-            }
-            psp::dprintln!("error: {:?}", e);
-            OpenAiError::TlsError
-        }
-
-        self.history.add_user_message(prompt.to_owned());
-
-        let (request_body, content_length) = self.history.to_string_with_content_length();
-
-        let request = format!(
-            "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nUser-Agent: Sony PSP\r\n\r\n{}\r\n",
-            POST_PATH,  
-            OPENAI_API_HOST,
-            self.api_key,
-            content_length,
-            request_body,
-        );
-
-        let request_bytes = request.as_bytes();
-
-        self.openai_context
-            .tls_socket
-            .write_all(request_bytes)
-            .map_err(|e| log_error(&e, Some("write_all")))?;
-        self.openai_context.tls_socket.flush().map_err(|e| log_error(&e, Some("flush")))?;
-
-        let response_buf = &mut [0u8; 16_384];
-        self.openai_context
-            .tls_socket
-            .read(response_buf)
-            .map_err(|e| log_error(&e, Some("read")))?;
-
-        let mut text = String::from_utf8_lossy(response_buf).to_string();
-        text = text.replace('\r', "");
-        text = text.replace('\0', "");
-
-        psp::dprintln!("{}", text);
-
-        let res_code = text
-            .split('\n')
-            .next()
-            .unwrap()
-            .split(' ')
-            .nth(1)
-            .ok_or(OpenAiError::UnparsableResponseCode)?;
-        if res_code != "200" {
-            return Err(OpenAiError::ResponseCodeNotOk);
-        }
-
-        let res_body = Regex::new(r"\{.*\}")
-            .unwrap()
-            .find(&text)
-            .ok_or(OpenAiError::UnparsableResponseBody)?
-            .as_str();
-        let completion_response: CompletionResponse = serde_json_core::from_str(res_body)
-            .map_err(|_| OpenAiError::UnparsableResponseBody)?
-            .0;
-
-        let assistant_message = completion_response.choices[0].message.content.trim();
-        self.history
-            .add_assistant_message(assistant_message.to_owned());
-
-        todo!()
     }
 }

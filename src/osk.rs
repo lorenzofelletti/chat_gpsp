@@ -21,8 +21,9 @@ pub mod prelude;
 static mut LIST: psp::Align16<[u32; 262_144]> = psp::Align16([0; 262_144]);
 
 #[inline]
-/// Setup GU
-/// Call once to setup the Graphics Utility (GU).
+/// Setup the Sony Computer Entertainment Graphics Utility.
+///
+/// Call once and only once to setup the GU.
 pub fn setup_gu() {
     unsafe {
         sceGuInit();

@@ -86,6 +86,10 @@ impl TcpSocket {
         }
     }
 
+    pub fn get_socket(&self) -> i32 {
+        self.0
+    }
+
     /// Read from the socket
     fn _read(self, buf: &mut [u8]) -> Result<usize, ()> {
         let result =
@@ -99,8 +103,6 @@ impl TcpSocket {
 
     /// Write to the socket
     fn _write(&self, buf: &[u8]) -> Result<usize, ()> {
-        psp::dprintln!("writing to socket");
-        //psp::dprintln!("buf: {:?}", buf);
         let result =
             unsafe { sys::sceNetInetSend(self.0, buf.as_ptr() as *const c_void, buf.len(), 0) };
         if (result as i32) < 0 {

@@ -4,8 +4,6 @@
 
 extern crate alloc;
 
-use core::f32::consts::E;
-
 use alloc::vec::Vec;
 use net::dns::DnsResolver;
 use openai::{OpenAi, OpenAiContext};
@@ -37,13 +35,14 @@ const CHAT_MAX_LENGTH: u16 = 128;
 #[allow(dead_code)]
 const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 
-const OPENAI_API_KEY: &'static str = core::env!("OPENAI_API_KEY");
+const OPENAI_API_KEY: &str = core::env!("OPENAI_API_KEY");
 
 #[no_mangle]
 fn psp_main() {
     psp::enable_home_button();
 
     unsafe {
+        // setup network
         net::utils::load_net_modules();
         psp::dprintln!("Initializing network...");
         net::utils::net_init();
@@ -57,21 +56,29 @@ fn psp_main() {
             }
             psp::sys::sceKernelDelayThread(50_000);
         }
+
+        // setup controls
+        psp::sys::sceCtrlSetSamplingCycle(0);
+        psp::sys::sceCtrlSetSamplingMode(psp::sys::CtrlMode::Analog);
     }
 
     psp::dprintln!("Connected to network!");
 
     let mut resolver = DnsResolver::default().expect("failed to create resolver");
 
-    let mut record_read_buf = OpenAiContext::create_new_buf();
-    let mut record_write_buf = OpenAiContext::create_new_buf();
     let openai_context =
-        OpenAiContext::new(&mut resolver, &mut record_read_buf, &mut record_write_buf)
-            .expect("failed to create openai context");
-
-    let mut openai = OpenAi::new(OPENAI_API_KEY, openai_context).expect("failed to create openai");
+        OpenAiContext::new(&mut resolver, OPENAI_API_KEY).expect("failed to create openai context");
 
     let mut input_handler = InputHandler::default();
+
+    psp::dprintln!("Press X to start asking GPT-3.5, any other button to exit.");
+    if !input_handler.choose_continue() {
+        unsafe {
+            psp::dprintln!("Exiting...");
+            sceGuTerm();
+            sceKernelExitGame();
+        };
+    }
 
     setup_gu();
 
@@ -91,16 +98,20 @@ fn psp_main() {
 
             read_from_osk(params).unwrap_or_default()
         };
+        let read_text = read_text.replace('\0', "");
+
+        let mut openai = OpenAi::new(&openai_context).expect("failed to create openai");
 
         let answer = openai.ask_gpt(read_text.as_str());
 
         if answer.is_err() {
             psp::dprintln!("failed to get answer from openai");
+            psp::dprintln!("Got error: {:?}", answer.err().unwrap());
         } else {
             psp::dprintln!("GPT: {}", answer.unwrap());
         }
 
-        psp::dprintln!("Press X to exit");
+        psp::dprintln!("Press X to ask again, any other button to exit.");
         if !input_handler.choose_continue() {
             break;
         }

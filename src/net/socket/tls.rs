@@ -3,6 +3,7 @@ use embedded_io::Write;
 use embedded_tls::{
     blocking::TlsConnection, Aes128GcmSha256, Certificate, NoVerify, TlsConfig, TlsContext,
 };
+use psp::sys;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use regex::Regex;
@@ -14,6 +15,7 @@ lazy_static::lazy_static! {
 }
 
 pub struct TlsSocket<'a> {
+    socket_fd: i32,
     tls_connection: TlsConnection<'a, TcpSocket, Aes128GcmSha256>,
     tls_config: TlsConfig<'a, Aes128GcmSha256>,
 }
@@ -40,6 +42,7 @@ impl<'a> TlsSocket<'a> {
             TlsConnection::new(socket, record_read_buf, record_write_buf);
 
         TlsSocket {
+            socket_fd: socket.get_socket(),
             tls_connection,
             tls_config,
         }
@@ -81,5 +84,13 @@ impl<'a> TlsSocket<'a> {
 
     pub fn flush(&mut self) -> Result<(), embedded_tls::TlsError> {
         self.tls_connection.flush()
+    }
+}
+
+impl Drop for TlsSocket<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            sys::sceNetInetClose(self.socket_fd);
+        }
     }
 }

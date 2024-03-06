@@ -81,7 +81,7 @@ impl ChatHistory {
         messages.pop(); // remove last comma
 
         format!(
-            "{{\r\n  \"model\": \"{}\",\r\n  \"messages\": [{}],\r\n  \"temperature\": {},\r\n  \"stream\": false\r\n}}",
+            "{{\n  \"model\": \"{}\",\n  \"messages\": [{}],\n  \"temperature\": {},\n  \"stream\": false\n}}",
             self.model, messages, self.temperature,
         )
     }
