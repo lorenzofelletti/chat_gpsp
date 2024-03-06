@@ -100,6 +100,8 @@ fn psp_main() {
         };
         let read_text = read_text.replace('\0', "");
 
+        psp::dprintln!("User: {}", read_text);
+
         let mut openai = OpenAi::new(&openai_context).expect("failed to create openai");
 
         let answer = openai.ask_gpt(read_text.as_str());
