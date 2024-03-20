@@ -10,7 +10,6 @@ use psp::sys::in_addr;
 
 use crate::{
     net::{
-        dns::DnsResolver,
         socket::{tcp::TcpSocket, tls::TlsSocket},
         traits::dns::ResolveHostname,
     },
