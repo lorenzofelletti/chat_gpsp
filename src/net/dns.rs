@@ -6,7 +6,7 @@ use psp::sys::in_addr;
 
 use crate::net::socket::udp::UdpSocketState;
 
-use super::socket::udp::UdpSocket;
+use super::{socket::udp::UdpSocket, traits};
 
 #[allow(unused)]
 pub const GOOGLE_DNS_HOST_ADDR: [u8; 4] = [8, 8, 8, 8];
@@ -127,3 +127,21 @@ impl DnsResolver {
         self.resolve(host, dns_server)
     }
 }
+
+impl traits::dns::ResolveHostname for DnsResolver {
+    type Error = ();
+
+    fn resolve_hostname(&mut self, hostname: &str) -> Result<in_addr, ()> {
+        self.resolve_with_google_dns(hostname)
+    }
+}
+
+impl traits::dns::ResolveAddr for DnsResolver {
+    type Error = ();
+
+    fn resolve_addr(&mut self, addr: in_addr) -> Result<String, ()> {
+        todo!("resolve_addr")
+    }
+}
+
+impl traits::dns::DnsResolver for DnsResolver {}

@@ -12,6 +12,7 @@ use crate::{
     net::{
         dns::DnsResolver,
         socket::{tcp::TcpSocket, tls::TlsSocket},
+        traits::dns::ResolveHostname,
     },
     openai::types::CompletionResponse,
 };
@@ -45,11 +46,14 @@ impl OpenAiContext {
     /// ```no_run
     /// let openai_context = OpenAiContext::new(&mut resolver, "my_api_key").unwrap();
     /// ```
-    pub fn new(resolver: &mut DnsResolver, api_key: &str) -> Result<Self, OpenAiError> {
+    pub fn new<T>(resolver: &mut T, api_key: &str) -> Result<Self, OpenAiError>
+    where
+        T: ResolveHostname,
+    {
         let api_key = api_key.to_owned();
 
         let remote = resolver
-            .resolve_with_google_dns(OPENAI_API_HOST)
+            .resolve_hostname(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
 
         Ok(OpenAiContext { remote, api_key })
