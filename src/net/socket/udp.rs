@@ -63,7 +63,7 @@ impl UdpSocket {
             return Err(SocketError::AlreadyBound);
         }
 
-        let default_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 01)), 0);
+        let default_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0);
         let addr = addr.unwrap_or(default_addr);
         match addr {
             SocketAddr::V4(v4) => {
