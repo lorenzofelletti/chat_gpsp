@@ -1,4 +1,4 @@
-use drogue_network::addr::SocketAddrV4;
+use embedded_nal::SocketAddrV4;
 use psp::sys::sockaddr;
 
 use super::netc;
@@ -23,4 +23,14 @@ pub fn socket_addr_v4_to_sockaddr(addr: SocketAddrV4) -> sockaddr {
     };
 
     unsafe { core::mem::transmute::<netc::sockaddr_in, netc::sockaddr>(sockaddr_in) }
+}
+
+trait ToSockaddr {
+    fn to_sockaddr(&self) -> sockaddr;
+}
+
+impl ToSockaddr for SocketAddrV4 {
+    fn to_sockaddr(&self) -> sockaddr {
+        socket_addr_v4_to_sockaddr(*self)
+    }
 }

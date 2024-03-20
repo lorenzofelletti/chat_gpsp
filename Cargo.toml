@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 psp = { version = "0.3.7" }
-drogue-network = "0.2"
 dns-protocol = { version = "0.1.1", default-features = false }
 embedded-tls = { version = "0.17", default-features = false }
 embedded-io = { version = "0.6.1", default-features = false }
@@ -21,6 +20,7 @@ nb = "1"
 lazy_static = { version = "1.4", default-features = false, features = [
     "spin_no_std",
 ] }
+embedded-nal = "0.8"
 
 [profile.release]
 lto = true

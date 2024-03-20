@@ -3,8 +3,8 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-use drogue_network::addr::{HostAddr, HostSocketAddr};
 
+use embedded_nal::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use embedded_tls::TlsError;
 use psp::sys::in_addr;
 
@@ -52,15 +52,6 @@ impl OpenAiContext {
             .resolve_with_google_dns(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
 
-        // check if remote is valid
-        let try_remote = HostSocketAddr::from(
-            &DnsResolver::in_addr_to_string(in_addr(remote.0)),
-            HTTPS_PORT,
-        );
-        if try_remote.is_err() {
-            return Err(OpenAiError::CannotResolveHost);
-        }
-
         Ok(OpenAiContext { remote, api_key })
     }
 
@@ -68,17 +59,13 @@ impl OpenAiContext {
         self.api_key.clone()
     }
 
-    pub fn remote(&self) -> HostSocketAddr {
-        HostSocketAddr::from(
-            &DnsResolver::in_addr_to_string(in_addr(self.remote.0)),
-            HTTPS_PORT,
-        )
-        .unwrap()
+    pub fn remote(&self) -> SocketAddr {
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(self.remote.0), HTTPS_PORT))
     }
 }
 
 pub struct OpenAi {
-    remote: HostSocketAddr,
+    remote: SocketAddr,
     api_key: String,
     history: ChatHistory,
 }
@@ -105,8 +92,7 @@ impl OpenAi {
         let mut write_buf = Self::create_new_buf();
 
         // get tls socket
-        let mut tls_socket =
-            Self::open_tls_socket(&mut read_buf, &mut write_buf, self.clone_remote())?;
+        let mut tls_socket = Self::open_tls_socket(&mut read_buf, &mut write_buf, self.remote)?;
 
         let request = format!(
             "POST {} HTTP/1.1\nHost: {}\nAuthorization: Bearer {}\nContent-Type: application/json\nContent-Length: {}\nUser-Agent: Sony PSP\n\n{}\n",
@@ -172,16 +158,10 @@ impl OpenAi {
         Ok(assistant_message.to_owned())
     }
 
-    pub fn clone_remote(&self) -> HostSocketAddr {
-        let ip = self.remote.addr().ip();
-        let addr: HostAddr = HostAddr::from(ip);
-        HostSocketAddr::new(addr, self.remote.port())
-    }
-
     fn open_tls_socket<'b>(
         record_read_buf: &'b mut [u8],
         record_write_buf: &'b mut [u8],
-        remote: HostSocketAddr,
+        remote: SocketAddr,
     ) -> Result<TlsSocket<'b>, OpenAiError> {
         let mut socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
         socket

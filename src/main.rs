@@ -100,7 +100,7 @@ fn psp_main() {
         };
         let read_text = read_text.replace('\0', "");
 
-        psp::dprintln!("User: {}", read_text);
+        psp::dprintln!("User: {}\n", read_text);
 
         let mut openai = OpenAi::new(&openai_context).expect("failed to create openai");
 
@@ -108,9 +108,9 @@ fn psp_main() {
 
         if answer.is_err() {
             psp::dprintln!("failed to get answer from openai");
-            psp::dprintln!("Got error: {:?}", answer.err().unwrap());
+            psp::dprintln!("Got error: {:?}\n", answer.err().unwrap());
         } else {
-            psp::dprintln!("GPT: {}", answer.unwrap());
+            psp::dprintln!("GPT: {}\n", answer.unwrap());
         }
 
         psp::dprintln!("Press X to ask again, any other button to exit.");

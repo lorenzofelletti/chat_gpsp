@@ -1,6 +1,6 @@
-use drogue_network::addr::{HostSocketAddr, SocketAddr};
 use embedded_io::ErrorType;
 
+use embedded_nal::SocketAddr;
 use psp::sys;
 
 use core::ffi::c_void;
@@ -45,11 +45,11 @@ impl TcpSocket {
     /// # Returns
     /// - `Ok(())` if the connection was successful
     /// - `Err(String)` if the connection was unsuccessful.
-    pub fn connect(&mut self, remote: HostSocketAddr) -> Result<(), SocketError> {
+    pub fn connect(&mut self, remote: SocketAddr) -> Result<(), SocketError> {
         if self.1 {
             return Err(SocketError::AlreadyConnected);
         }
-        match remote.as_socket_addr() {
+        match remote {
             SocketAddr::V4(v4) => {
                 let octets = v4.ip().octets();
                 let sin_addr = u32::from_le_bytes(octets);
