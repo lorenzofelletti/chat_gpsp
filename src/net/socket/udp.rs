@@ -1,8 +1,10 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use embedded_nal::{IpAddr, Ipv4Addr, SocketAddr};
 use psp::sys::{self, sockaddr, socklen_t};
 
 use core::ffi::c_void;
+
+use crate::net::traits::SocketBuffer;
 
 use super::{super::netc, error::SocketError, ToSockaddr};
 
@@ -17,7 +19,6 @@ pub enum UdpSocketState {
     Connected,
 }
 
-#[derive(Clone)]
 #[repr(C)]
 /// A UDP socket
 ///
@@ -29,12 +30,7 @@ pub enum UdpSocketState {
 ///
 /// # Notes
 /// - Remote [host](Self::1) is set when the socket is bound calling [`bind()`](UdpSocket::bind)
-pub struct UdpSocket(
-    i32,
-    Option<sockaddr>,
-    UdpSocketState,
-    Vec<u8>, // buffer
-);
+pub struct UdpSocket(i32, Option<sockaddr>, UdpSocketState, Box<dyn SocketBuffer>);
 
 impl UdpSocket {
     #[allow(dead_code)]
@@ -44,7 +40,12 @@ impl UdpSocket {
         if sock < 0 {
             Err(SocketError::Errno(unsafe { sys::sceNetInetGetErrno() }))
         } else {
-            Ok(UdpSocket(sock, None, UdpSocketState::Unbound, Vec::new()))
+            Ok(UdpSocket(
+                sock,
+                None,
+                UdpSocketState::Unbound,
+                Box::new(Vec::new()),
+            ))
         }
     }
 
@@ -174,7 +175,7 @@ impl UdpSocket {
         }?;
         let socklen = core::mem::size_of::<netc::sockaddr>() as u32;
 
-        self.append_buffer(buf);
+        self.3.append_buffer(buf);
 
         let result = unsafe {
             sys::sceNetInetSendto(
@@ -189,7 +190,7 @@ impl UdpSocket {
         if (result as i32) < 0 {
             Err(SocketError::Errno(unsafe { sys::sceNetInetGetErrno() }))
         } else {
-            self.shift_left_buffer(result as usize);
+            self.3.shift_left_buffer(result as usize);
             Ok(result as usize)
         }
     }
@@ -201,7 +202,7 @@ impl UdpSocket {
             return Err(SocketError::NotConnected);
         }
 
-        self.append_buffer(buf);
+        self.3.append_buffer(buf);
 
         self.send()
     }
@@ -229,7 +230,7 @@ impl UdpSocket {
         if (result as i32) < 0 {
             Err(SocketError::Errno(unsafe { sys::sceNetInetGetErrno() }))
         } else {
-            self.shift_left_buffer(result as usize);
+            self.3.shift_left_buffer(result as usize);
             Ok(result as usize)
         }
     }
@@ -240,19 +241,6 @@ impl UdpSocket {
     /// The state of the socket
     pub fn get_socket_state(&self) -> UdpSocketState {
         self.2
-    }
-
-    fn append_buffer(&mut self, buf: &[u8]) {
-        self.3.append(&mut buf.to_vec());
-    }
-
-    fn shift_left_buffer(&mut self, amount: usize) {
-        // shift the buffer to the left by amount
-        if self.3.len() <= amount {
-            self.3.clear();
-        } else {
-            self.3 = self.3.split_off(amount);
-        }
     }
 
     fn socket_len() -> socklen_t {

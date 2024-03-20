@@ -19,7 +19,6 @@ pub fn create_a_type_query(domain: &str) -> Question {
     Question::new(domain, dns_protocol::ResourceType::A, 1)
 }
 
-#[derive(Clone)]
 /// A DNS resolver
 pub struct DnsResolver {
     udp_socket: UdpSocket,

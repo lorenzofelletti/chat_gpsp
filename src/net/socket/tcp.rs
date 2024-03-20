@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use embedded_io::ErrorType;
 
 use embedded_nal::SocketAddr;
@@ -5,24 +7,26 @@ use psp::sys;
 
 use core::ffi::c_void;
 
+use crate::net::traits::SocketBuffer;
+
 use super::super::netc;
 
 use super::error::SocketError;
 
 // TODO: review implementation
-#[derive(Clone, Copy)]
 #[repr(C)]
 /// A TCP socket
 ///
 /// # Fields
 /// - [`Self::0`]: The socket file descriptor
 /// - [`Self::1`]: Whether the socket is connected
+/// - [`Self::2`]: The buffer to store data to send
 ///
 /// # Safety
 /// This is a wrapper around a raw socket file descriptor.
 ///
 /// The socket is closed when the struct is dropped.
-pub struct TcpSocket(i32, bool);
+pub struct TcpSocket(i32, bool, Box<dyn SocketBuffer>);
 
 impl TcpSocket {
     #[allow(dead_code)]
@@ -32,7 +36,7 @@ impl TcpSocket {
         if sock < 0 {
             Err(SocketError::Errno(unsafe { sys::sceNetInetGetErrno() }))
         } else {
-            Ok(TcpSocket(sock, false))
+            Ok(TcpSocket(sock, false, Box::new(Vec::new())))
         }
     }
 
@@ -91,47 +95,48 @@ impl TcpSocket {
     }
 
     /// Read from the socket
-    fn _read(self, buf: &mut [u8]) -> Result<usize, ()> {
+    fn _read(&self, buf: &mut [u8]) -> Result<usize, SocketError> {
         let result =
             unsafe { sys::sceNetInetRecv(self.0, buf.as_mut_ptr() as *mut c_void, buf.len(), 0) };
         if (result as i32) < 0 {
-            Err(())
+            Err(SocketError::Errno(unsafe { sys::sceNetInetGetErrno() }))
         } else {
             Ok(result)
         }
     }
 
     /// Write to the socket
-    fn _write(&self, buf: &[u8]) -> Result<usize, ()> {
-        let result =
-            unsafe { sys::sceNetInetSend(self.0, buf.as_ptr() as *const c_void, buf.len(), 0) };
-        if (result as i32) < 0 {
-            Err(())
-        } else {
-            Ok(result as usize)
-        }
+    fn _write(&mut self, buf: &[u8]) -> Result<usize, SocketError> {
+        self.2.append_buffer(buf);
+        self.send()
     }
 
-    fn _write_mut(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-        let result =
-            unsafe { sys::sceNetInetSend(self.0, buf.as_mut_ptr() as *const c_void, buf.len(), 0) };
-        if (result as i32) < 0 {
-            Err(())
-        } else {
-            Ok(result as usize)
+    fn _flush(&mut self) -> Result<(), SocketError> {
+        while !self.2.is_empty() {
+            self.send()?;
         }
+        Ok(())
     }
 
-    fn _write_all(&self, buf: &[u8]) -> Result<usize, ()> {
-        let mut written = 0;
-        while written < buf.len() {
-            let result = self._write(&buf[written..]);
-            if result.is_err() {
-                return Err(());
-            }
-            written += result.unwrap();
+    fn send(&mut self) -> Result<usize, SocketError> {
+        if !self.1 {
+            return Err(SocketError::NotConnected);
         }
-        Ok(written)
+
+        let result = unsafe {
+            sys::sceNetInetSend(
+                self.0,
+                self.2.as_slice().as_ptr() as *const c_void,
+                self.2.len(),
+                0,
+            )
+        };
+        if (result as i32) < 0 {
+            Err(SocketError::Errno(unsafe { sys::sceNetInetGetErrno() }))
+        } else {
+            self.2.shift_left_buffer(result as usize);
+            Ok(result as usize)
+        }
     }
 }
 
@@ -145,7 +150,7 @@ impl embedded_io::Read for TcpSocket {
         if !self.1 {
             return Err(SocketError::NotConnected);
         }
-        self._read(buf).map_err(|_| SocketError::Other)
+        self._read(buf)
     }
 }
 
@@ -155,13 +160,10 @@ impl embedded_io::Write for TcpSocket {
         if !self.1 {
             return Err(SocketError::NotConnected);
         }
-        self._write_all(buf).map_err(|_| SocketError::Other)
+        self._write(buf)
     }
 
     fn flush(&mut self) -> Result<(), SocketError> {
-        // FIXME: implement correctly
-        // sleep for a bit to allow the data to be sent
-        unsafe { sys::sceKernelDelayThread(100_000) };
-        Ok(())
+        self._flush()
     }
 }

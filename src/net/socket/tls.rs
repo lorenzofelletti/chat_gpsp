@@ -28,6 +28,8 @@ impl<'a> TlsSocket<'a> {
         server_name: &'a str,
         cert: Option<&'a [u8]>,
     ) -> Self {
+        let socket_fd = socket.get_socket();
+
         let tls_config: TlsConfig<'_, Aes128GcmSha256> = match cert {
             Some(cert) => TlsConfig::new()
                 .with_server_name(server_name)
@@ -42,7 +44,7 @@ impl<'a> TlsSocket<'a> {
             TlsConnection::new(socket, record_read_buf, record_write_buf);
 
         TlsSocket {
-            socket_fd: socket.get_socket(),
+            socket_fd,
             tls_connection,
             tls_config,
         }
