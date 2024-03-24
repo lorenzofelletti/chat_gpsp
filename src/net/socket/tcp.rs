@@ -37,7 +37,7 @@ impl TcpSocket {
         if sock < 0 {
             Err(SocketError::Errno(unsafe { sys::sceNetInetGetErrno() }))
         } else {
-            Ok(TcpSocket(sock, false, Box::new(Vec::new())))
+            Ok(TcpSocket(sock, false, Box::<Vec<u8>>::default()))
         }
     }
 

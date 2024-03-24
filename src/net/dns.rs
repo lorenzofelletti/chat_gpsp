@@ -41,7 +41,7 @@ impl DnsResolver {
     /// Create a new DNS resolver with default settings.
     /// The default settings are to use Google's DNS server at `8.8.8.8:53`
     pub fn default() -> Result<Self, ()> {
-        let dns = GOOGLE_DNS_HOST.clone();
+        let dns = *GOOGLE_DNS_HOST;
         let mut udp_socket = UdpSocket::open().map_err(|_| ())?;
         udp_socket.bind(None).map_err(|_| ())?;
 
