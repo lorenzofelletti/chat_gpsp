@@ -6,7 +6,10 @@ use psp::sys::in_addr;
 
 use crate::net::socket::udp::UdpSocketState;
 
-use super::{socket::udp::UdpSocket, traits};
+use super::{
+    socket::{udp::UdpSocket, ToSocketAddr},
+    traits,
+};
 
 pub const DNS_PORT: u16 = 53;
 lazy_static::lazy_static! {
@@ -120,8 +123,8 @@ impl DnsResolver {
 impl traits::dns::ResolveHostname for DnsResolver {
     type Error = ();
 
-    fn resolve_hostname(&mut self, hostname: &str) -> Result<in_addr, ()> {
-        self.resolve(hostname)
+    fn resolve_hostname(&mut self, hostname: &str) -> Result<SocketAddr, ()> {
+        self.resolve(hostname).map(|addr| addr.to_socket_addr())
     }
 }
 

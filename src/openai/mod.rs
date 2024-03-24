@@ -4,9 +4,8 @@ use alloc::{
     string::{String, ToString},
 };
 
-use embedded_nal::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use embedded_nal::SocketAddr;
 use embedded_tls::TlsError;
-use psp::sys::in_addr;
 
 use crate::{
     net::{
@@ -34,7 +33,7 @@ pub enum OpenAiError {
 }
 
 pub struct OpenAiContext {
-    remote: in_addr,
+    remote: SocketAddr,
     api_key: String,
 }
 
@@ -63,7 +62,7 @@ impl OpenAiContext {
     }
 
     pub fn remote(&self) -> SocketAddr {
-        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(self.remote.0), HTTPS_PORT))
+        self.remote
     }
 }
 

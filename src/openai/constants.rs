@@ -1,6 +1,5 @@
 pub const OPENAI_API_HOST: &str = "api.openai.com";
 pub const POST_PATH: &str = "/v1/chat/completions";
-pub const HTTPS_PORT: u16 = 443;
 pub const GPT3_MODEL: &str = "gpt-3.5-turbo";
 #[allow(unused)]
 pub const CHAT_MAX_LENGTH: u16 = 128;

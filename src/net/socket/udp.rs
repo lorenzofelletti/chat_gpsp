@@ -103,7 +103,7 @@ impl UdpSocket {
 
         match addr {
             SocketAddr::V4(v4) => {
-                let sockaddr = super::socket_addr_v4_to_sockaddr(v4);
+                let sockaddr = v4.to_sockaddr();
 
                 if unsafe { sys::sceNetInetConnect(self.0, &sockaddr, Self::socket_len()) } != 0 {
                     let errno = unsafe { sys::sceNetInetGetErrno() };
@@ -245,6 +245,14 @@ impl UdpSocket {
 
     fn socket_len() -> socklen_t {
         core::mem::size_of::<netc::sockaddr>() as u32
+    }
+}
+
+impl Drop for UdpSocket {
+    fn drop(&mut self) {
+        unsafe {
+            sys::sceNetInetClose(self.0);
+        }
     }
 }
 
