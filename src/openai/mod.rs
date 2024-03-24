@@ -3,15 +3,15 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-use drogue_network::addr::{HostAddr, HostSocketAddr};
 
+use embedded_nal::SocketAddr;
 use embedded_tls::TlsError;
-use psp::sys::in_addr;
 
 use crate::{
     net::{
-        dns::DnsResolver,
+        constants::HTTPS_PORT,
         socket::{tcp::TcpSocket, tls::TlsSocket},
+        traits::dns::ResolveHostname,
     },
     openai::types::CompletionResponse,
 };
@@ -34,7 +34,7 @@ pub enum OpenAiError {
 }
 
 pub struct OpenAiContext {
-    remote: in_addr,
+    remote: SocketAddr,
     api_key: String,
 }
 
@@ -45,21 +45,16 @@ impl OpenAiContext {
     /// ```no_run
     /// let openai_context = OpenAiContext::new(&mut resolver, "my_api_key").unwrap();
     /// ```
-    pub fn new(resolver: &mut DnsResolver, api_key: &str) -> Result<Self, OpenAiError> {
+    pub fn new<T>(resolver: &mut T, api_key: &str) -> Result<Self, OpenAiError>
+    where
+        T: ResolveHostname,
+    {
         let api_key = api_key.to_owned();
 
-        let remote = resolver
-            .resolve_with_google_dns(OPENAI_API_HOST)
+        let mut remote = resolver
+            .resolve_hostname(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
-
-        // check if remote is valid
-        let try_remote = HostSocketAddr::from(
-            &DnsResolver::in_addr_to_string(in_addr(remote.0)),
-            HTTPS_PORT,
-        );
-        if try_remote.is_err() {
-            return Err(OpenAiError::CannotResolveHost);
-        }
+        remote.set_port(HTTPS_PORT);
 
         Ok(OpenAiContext { remote, api_key })
     }
@@ -68,17 +63,13 @@ impl OpenAiContext {
         self.api_key.clone()
     }
 
-    pub fn remote(&self) -> HostSocketAddr {
-        HostSocketAddr::from(
-            &DnsResolver::in_addr_to_string(in_addr(self.remote.0)),
-            HTTPS_PORT,
-        )
-        .unwrap()
+    pub fn remote(&self) -> SocketAddr {
+        self.remote
     }
 }
 
 pub struct OpenAi {
-    remote: HostSocketAddr,
+    remote: SocketAddr,
     api_key: String,
     history: ChatHistory,
 }
@@ -105,8 +96,7 @@ impl OpenAi {
         let mut write_buf = Self::create_new_buf();
 
         // get tls socket
-        let mut tls_socket =
-            Self::open_tls_socket(&mut read_buf, &mut write_buf, self.clone_remote())?;
+        let mut tls_socket = Self::open_tls_socket(&mut read_buf, &mut write_buf, self.remote)?;
 
         let request = format!(
             "POST {} HTTP/1.1\nHost: {}\nAuthorization: Bearer {}\nContent-Type: application/json\nContent-Length: {}\nUser-Agent: Sony PSP\n\n{}\n",
@@ -172,16 +162,10 @@ impl OpenAi {
         Ok(assistant_message.to_owned())
     }
 
-    pub fn clone_remote(&self) -> HostSocketAddr {
-        let ip = self.remote.addr().ip();
-        let addr: HostAddr = HostAddr::from(ip);
-        HostSocketAddr::new(addr, self.remote.port())
-    }
-
     fn open_tls_socket<'b>(
         record_read_buf: &'b mut [u8],
         record_write_buf: &'b mut [u8],
-        remote: HostSocketAddr,
+        remote: SocketAddr,
     ) -> Result<TlsSocket<'b>, OpenAiError> {
         let mut socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
         socket

@@ -1,21 +1,19 @@
-use alloc::{format, string::String, vec as a_vec, vec::Vec};
+use alloc::{string::String, vec as a_vec};
 use dns_protocol::{Flags, Question, ResourceRecord};
-use drogue_network::addr::{HostAddr, HostSocketAddr};
 use embedded_io::{Read, Write};
+use embedded_nal::{IpAddr, Ipv4Addr, SocketAddr};
 use psp::sys::in_addr;
 
 use crate::net::socket::udp::UdpSocketState;
 
-use super::socket::udp::UdpSocket;
+use super::{
+    socket::{udp::UdpSocket, ToSocketAddr},
+    traits,
+};
 
-#[allow(unused)]
-pub const GOOGLE_DNS_HOST_ADDR: [u8; 4] = [8, 8, 8, 8];
-#[allow(unused)]
 pub const DNS_PORT: u16 = 53;
-
-#[allow(unused)]
-pub fn google_dns_host_socket_addr() -> HostSocketAddr {
-    HostSocketAddr::new(HostAddr::ipv4(GOOGLE_DNS_HOST_ADDR), DNS_PORT)
+lazy_static::lazy_static! {
+    static ref GOOGLE_DNS_HOST: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), DNS_PORT);
 }
 
 #[allow(unused)]
@@ -24,29 +22,30 @@ pub fn create_a_type_query(domain: &str) -> Question {
     Question::new(domain, dns_protocol::ResourceType::A, 1)
 }
 
-// TODO: create trait for DNS resolver
-#[derive(Clone)]
 /// A DNS resolver
 pub struct DnsResolver {
     udp_socket: UdpSocket,
+    dns: SocketAddr,
 }
 
 impl DnsResolver {
     /// Create a new DNS resolver
     #[allow(unused)]
-    pub fn new(host: HostSocketAddr) -> Result<Self, ()> {
+    pub fn new(dns: SocketAddr) -> Result<Self, ()> {
         let mut udp_socket = UdpSocket::open().map_err(|_| ())?;
-        udp_socket.bind(Some(host)).map_err(|_| ())?;
+        udp_socket.bind(Some(dns)).map_err(|_| ())?;
 
-        Ok(DnsResolver { udp_socket })
+        Ok(DnsResolver { udp_socket, dns })
     }
 
-    /// Create a new DNS resolver with default settings
+    /// Create a new DNS resolver with default settings.
+    /// The default settings are to use Google's DNS server at `8.8.8.8:53`
     pub fn default() -> Result<Self, ()> {
+        let dns = GOOGLE_DNS_HOST.clone();
         let mut udp_socket = UdpSocket::open().map_err(|_| ())?;
         udp_socket.bind(None).map_err(|_| ())?;
 
-        Ok(DnsResolver { udp_socket })
+        Ok(DnsResolver { udp_socket, dns })
     }
 
     /// Resolve a hostname to an IP address
@@ -57,10 +56,10 @@ impl DnsResolver {
     /// # Returns
     /// - `Ok(in_addr)`: The IP address of the hostname
     /// - `Err(())`: If the hostname could not be resolved
-    pub fn resolve(&mut self, host: &str, dns_server: HostSocketAddr) -> Result<in_addr, ()> {
+    pub fn resolve(&mut self, host: &str) -> Result<in_addr, ()> {
         // connect to the DNS server, if not already
         if self.udp_socket.get_socket_state() != UdpSocketState::Connected {
-            self.udp_socket.connect(dns_server).map_err(|_| ())?;
+            self.udp_socket.connect(self.dns).map_err(|_| ())?;
         }
 
         // create a new query
@@ -113,44 +112,28 @@ impl DnsResolver {
             4 => {
                 let mut octets = [0u8; 4];
                 octets.copy_from_slice(answer.data());
-                let addr = in_addr(u32::from_le_bytes(octets));
+                let addr = in_addr(u32::from_be_bytes(octets));
                 Ok(addr)
             }
             _ => Err(()),
         }
     }
+}
 
-    #[inline]
-    /// Resolve a hostname to an IP address using Google's DNS server `8.8.8.8`
-    pub fn resolve_with_google_dns(&mut self, host: &str) -> Result<in_addr, ()> {
-        let dns_server = google_dns_host_socket_addr();
-        self.resolve(host, dns_server)
-    }
+impl traits::dns::ResolveHostname for DnsResolver {
+    type Error = ();
 
-    /// Convert an [`in_addr`] to a [String]
-    ///
-    /// # Parameters
-    /// - `addr`: The [`in_addr`] to convert
-    ///
-    /// # Returns
-    /// - A [String] representation of the [`in_addr`]
-    ///
-    /// # Example
-    /// ```no_run
-    /// use psp::sys::in_addr;
-    /// use crate::net::resolver::DnsResolver;
-    ///
-    /// let mut resolver = DnsResolver::default().unwrap();
-    /// let addr = resolver.resolve("google.com").unwrap();
-    /// let addr_str = resolver.in_addr_to_string(addr);
-    /// ```
-    ///
-    pub fn in_addr_to_string(addr: in_addr) -> String {
-        let octets = addr.0.to_le_bytes();
-        let octets = octets
-            .iter()
-            .map(|x| format!("{}", x))
-            .collect::<Vec<String>>();
-        octets.join(".")
+    fn resolve_hostname(&mut self, hostname: &str) -> Result<SocketAddr, ()> {
+        self.resolve(hostname).map(|addr| addr.to_socket_addr())
     }
 }
+
+impl traits::dns::ResolveAddr for DnsResolver {
+    type Error = ();
+
+    fn resolve_addr(&mut self, _addr: in_addr) -> Result<String, ()> {
+        todo!("resolve_addr")
+    }
+}
+
+impl traits::dns::DnsResolver for DnsResolver {}
