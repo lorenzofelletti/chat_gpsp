@@ -40,7 +40,7 @@ pub trait ToSocketAddr {
 
 impl ToSocketAddr for in_addr {
     fn to_socket_addr(&self) -> SocketAddr {
-        let octets = self.0.to_le_bytes();
+        let octets = self.0.to_be_bytes();
         let ip = Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]);
         SocketAddr::V4(SocketAddrV4::new(ip, 0))
     }

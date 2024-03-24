@@ -112,7 +112,7 @@ impl DnsResolver {
             4 => {
                 let mut octets = [0u8; 4];
                 octets.copy_from_slice(answer.data());
-                let addr = in_addr(u32::from_le_bytes(octets));
+                let addr = in_addr(u32::from_be_bytes(octets));
                 Ok(addr)
             }
             _ => Err(()),

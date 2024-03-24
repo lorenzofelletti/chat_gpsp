@@ -9,6 +9,7 @@ use embedded_tls::TlsError;
 
 use crate::{
     net::{
+        constants::HTTPS_PORT,
         socket::{tcp::TcpSocket, tls::TlsSocket},
         traits::dns::ResolveHostname,
     },
@@ -50,9 +51,10 @@ impl OpenAiContext {
     {
         let api_key = api_key.to_owned();
 
-        let remote = resolver
+        let mut remote = resolver
             .resolve_hostname(OPENAI_API_HOST)
             .map_err(|_| OpenAiError::CannotResolveHost)?;
+        remote.set_port(HTTPS_PORT);
 
         Ok(OpenAiContext { remote, api_key })
     }
