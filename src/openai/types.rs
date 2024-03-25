@@ -1,5 +1,11 @@
+use core::fmt::Display;
+
 use crate::openai::constants::*;
-use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
+use alloc::{
+    borrow::ToOwned,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use serde::Deserialize;
 
@@ -22,8 +28,10 @@ impl Message {
             content,
         }
     }
+}
 
-    pub fn to_string(&self) -> String {
+impl Display for Message {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let serialized_content = self
             .content
             .replace('\n', "\\n")
@@ -31,7 +39,8 @@ impl Message {
             .replace('\'', "\\'")
             .replace('\"', "\\\"");
 
-        format!(
+        write!(
+            f,
             "{{\"role\": \"{}\", \"content\": \"{}\"}}",
             self.role, serialized_content
         )
@@ -72,7 +81,16 @@ impl ChatHistory {
         self.messages.push(Message::new_assistant(content));
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn to_string_with_content_length(&self) -> (String, usize) {
+        let string = self.to_string();
+        let len = string.len();
+
+        (string, len)
+    }
+}
+
+impl Display for ChatHistory {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut messages = String::new();
         for message in &self.messages {
             messages.push_str(&message.to_string());
@@ -80,17 +98,11 @@ impl ChatHistory {
         }
         messages.pop(); // remove last comma
 
-        format!(
+        write!(
+            f,
             "{{\n  \"model\": \"{}\",\n  \"messages\": [{}],\n  \"temperature\": {},\n  \"stream\": false\n}}",
             self.model, messages, self.temperature,
         )
-    }
-
-    pub fn to_string_with_content_length(&self) -> (String, usize) {
-        let string = self.to_string();
-        let len = string.len();
-
-        (string, len)
     }
 }
 

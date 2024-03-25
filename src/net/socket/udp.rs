@@ -44,7 +44,7 @@ impl UdpSocket {
                 sock,
                 None,
                 UdpSocketState::Unbound,
-                Box::new(Vec::new()),
+                Box::<Vec<u8>>::default(),
             ))
         }
     }
