@@ -120,9 +120,9 @@ impl OpenAi {
             let response_buf = &mut [0u8; 16_384];
             tls_socket.read(response_buf).map_err(|e| log_error(&e))?;
 
-            let mut text = String::from_utf8_lossy(response_buf).to_string();
-            text = text.replace('\r', "");
-            text = text.replace('\0', "");
+            let text = String::from_utf8_lossy(response_buf)
+                .to_string()
+                .replace(['\r', '\0'], "");
 
             response_string += &text;
 
