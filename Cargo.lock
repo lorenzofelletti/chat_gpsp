@@ -101,8 +101,6 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "chat_gpsp"
 version = "0.1.0"
 dependencies = [
- "embedded-nal",
- "embedded-tls",
  "heapless 0.8.0",
  "lazy_static",
  "nb",
@@ -564,9 +562,9 @@ dependencies = [
 
 [[package]]
 name = "psp-net"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4624fc113a46e4fcf51ed7de97f40082491902d5ea300f2c70b23bedebcd7548"
+checksum = "b51b78b7d80f0d721f45f21cacd6ff733b3e0afb37ebc75e644a31fddc8ece12"
 dependencies = [
  "dns-protocol",
  "embedded-io",

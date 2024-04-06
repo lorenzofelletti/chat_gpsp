@@ -7,8 +7,7 @@ edition = "2021"
 
 [dependencies]
 psp = { version = "0.3.7" }
-psp-net = { version = "0.1.0", default-features = false }
-embedded-tls = { version = "0.17", default-features = false }
+psp-net = { version = "0.1.1", default-features = false }
 heapless = { version = "0.8", features = ["serde"] }
 regex = { version = "1.10", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
@@ -17,7 +16,6 @@ nb = "1"
 lazy_static = { version = "1.4", default-features = false, features = [
     "spin_no_std",
 ] }
-embedded-nal = "0.8"
 
 [profile.release]
 lto = true

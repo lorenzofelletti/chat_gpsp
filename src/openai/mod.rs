@@ -4,12 +4,11 @@ use alloc::{
     string::{String, ToString},
 };
 
-use embedded_nal::SocketAddr;
-use embedded_tls::TlsError;
 use psp_net::{
     constants::HTTPS_PORT,
     socket::{tcp::TcpSocket, tls::TlsSocket},
     traits::dns::ResolveHostname,
+    SocketAddr, TlsError,
 };
 
 use crate::openai::types::CompletionResponse;
