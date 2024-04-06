@@ -6,15 +6,13 @@ use alloc::{
 
 use embedded_nal::SocketAddr;
 use embedded_tls::TlsError;
-
-use crate::{
-    net::{
-        constants::HTTPS_PORT,
-        socket::{tcp::TcpSocket, tls::TlsSocket},
-        traits::dns::ResolveHostname,
-    },
-    openai::types::CompletionResponse,
+use psp_net::{
+    constants::HTTPS_PORT,
+    socket::{tcp::TcpSocket, tls::TlsSocket},
+    traits::dns::ResolveHostname,
 };
+
+use crate::openai::types::CompletionResponse;
 use constants::*;
 
 use self::types::ChatHistory;

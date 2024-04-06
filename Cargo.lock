@@ -101,16 +101,13 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "chat_gpsp"
 version = "0.1.0"
 dependencies = [
- "dns-protocol",
- "embedded-io",
  "embedded-nal",
  "embedded-tls",
  "heapless 0.8.0",
  "lazy_static",
  "nb",
  "psp",
- "rand",
- "rand_chacha",
+ "psp-net",
  "regex",
  "serde",
  "serde-json-core",
@@ -563,6 +560,23 @@ dependencies = [
  "num_enum_derive",
  "paste",
  "unstringify",
+]
+
+[[package]]
+name = "psp-net"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4624fc113a46e4fcf51ed7de97f40082491902d5ea300f2c70b23bedebcd7548"
+dependencies = [
+ "dns-protocol",
+ "embedded-io",
+ "embedded-nal",
+ "embedded-tls",
+ "lazy_static",
+ "psp",
+ "rand",
+ "rand_chacha",
+ "regex",
 ]
 
 [[package]]

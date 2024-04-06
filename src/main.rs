@@ -5,13 +5,13 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use net::dns::DnsResolver;
 use openai::{OpenAi, OpenAiContext};
 use osk::{
     prelude::{default_osk_data, default_osk_params},
     read_from_osk, start_osk,
 };
 use psp::sys::{sceGuTerm, sceKernelDcacheWritebackAll, sceKernelExitGame};
+use psp_net::dns::DnsResolver;
 
 use crate::{
     osk::setup_gu,
@@ -20,7 +20,6 @@ use crate::{
 
 psp::module!("chat-gpsp", 1, 1);
 
-mod net;
 mod openai;
 mod osk;
 pub mod utils;
@@ -43,9 +42,9 @@ fn psp_main() {
 
     unsafe {
         // setup network
-        net::utils::load_net_modules();
+        psp_net::utils::load_net_modules();
         psp::dprintln!("Initializing network...");
-        net::utils::net_init();
+        psp_net::utils::net_init();
 
         psp::sys::sceNetApctlConnect(1);
         loop {
@@ -64,7 +63,7 @@ fn psp_main() {
 
     psp::dprintln!("Connected to network!");
 
-    let mut resolver = DnsResolver::default().expect("failed to create resolver");
+    let mut resolver = DnsResolver::try_default().expect("failed to create resolver");
 
     let openai_context =
         OpenAiContext::new(&mut resolver, OPENAI_API_KEY).expect("failed to create openai context");
