@@ -1,4 +1,4 @@
-use core::ffi::c_void;
+use core::{ffi::c_void, ptr::addr_of_mut};
 
 use alloc::string::String;
 
@@ -6,7 +6,7 @@ use psp::{
     sys::{
         self, sceDisplayWaitVblankStart, sceGuClear, sceGuInit, sceGuSwapBuffers,
         sceUtilityOskInitStart, sceUtilityOskShutdownStart, sceUtilityOskUpdate, ClearBuffer,
-        GuState, GuSyncMode, SceUtilityOskData, SceUtilityOskParams, SceUtilityOskState,
+        GuState, GuSyncMode, PspUtilityDialogState, SceUtilityOskData, SceUtilityOskParams,
         TexturePixelFormat,
     },
     SCREEN_HEIGHT, SCREEN_WIDTH,
@@ -29,7 +29,7 @@ pub fn setup_gu() {
         sceGuInit();
         sys::sceGuStart(
             sys::GuContextType::Direct,
-            &mut LIST as *mut _ as *mut c_void,
+            addr_of_mut!(LIST) as *mut _ as *mut c_void,
         );
         // setup buffers and viewport
         sys::sceGuDrawBuffer(
@@ -133,7 +133,7 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
         while !done {
             sys::sceGuStart(
                 sys::GuContextType::Direct,
-                &mut LIST as *mut _ as *mut c_void,
+                addr_of_mut!(LIST) as *mut _ as *mut c_void,
             );
             sys::sceGuClear(ClearBuffer::COLOR_BUFFER_BIT | ClearBuffer::DEPTH_BUFFER_BIT);
 
@@ -142,14 +142,13 @@ pub fn read_from_osk(params: &mut SceUtilityOskParams) -> Option<String> {
 
             sceGuClear(ClearBuffer::COLOR_BUFFER_BIT);
             match osk_state.get() {
-                // TODO: switch to PspUtilityDialogState when it's implemented
-                SceUtilityOskState::None => done = true,
-                SceUtilityOskState::Initialized => {
+                PspUtilityDialogState::None => done = true,
+                PspUtilityDialogState::Visible => {
                     if sceUtilityOskUpdate(1).is_negative() {
                         panic!("cannot update osk");
                     }
                 }
-                SceUtilityOskState::Visible => {
+                PspUtilityDialogState::Quit => {
                     if sceUtilityOskShutdownStart().is_negative() {
                         panic!("cannot shutdown osk");
                     }
