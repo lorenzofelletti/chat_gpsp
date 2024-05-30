@@ -4,6 +4,7 @@ use alloc::{
     string::{String, ToString},
 };
 
+use lazy_static::lazy_static;
 use psp_net::{
     constants::HTTPS_PORT,
     socket::{tcp::TcpSocket, tls::TlsSocket},
@@ -11,6 +12,7 @@ use psp_net::{
     types::{SocketOptions, TlsSocketOptions},
     Read, SocketAddr, TlsError, Write,
 };
+use regex::{Regex, RegexBuilder};
 
 use crate::openai::types::CompletionResponse;
 use constants::*;
@@ -19,6 +21,13 @@ use self::types::ChatHistory;
 
 pub mod constants;
 pub mod types;
+
+lazy_static! {
+    static ref BODY_REGEX: Regex = RegexBuilder::new(r"\{.*\}")
+        .dot_matches_new_line(true)
+        .build()
+        .expect("regex should be valid");
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenAiError {
@@ -108,13 +117,13 @@ impl OpenAi {
 
         let mut response_string = String::new();
 
+        tls_socket
+            .write_all(request_bytes)
+            .map_err(|e| log_error(&e))?;
+
+        tls_socket.flush().map_err(|e| log_error(&e))?;
+
         for _ in 1..=MAX_RETRIES {
-            tls_socket
-                .write_all(request_bytes)
-                .map_err(|e| log_error(&e))?;
-
-            tls_socket.flush().map_err(|e| log_error(&e))?;
-
             let response_buf = &mut [0u8; 16_384];
             tls_socket.read(response_buf).map_err(|e| log_error(&e))?;
 
@@ -122,26 +131,28 @@ impl OpenAi {
                 .to_string()
                 .replace(['\r', '\0'], "");
 
-            response_string += &text;
-
-            let res_code = response_string
-                .split('\n')
-                .next()
-                .ok_or(OpenAiError::UnparsableResponseCode)?
-                .split(' ')
-                .nth(1)
-                .ok_or(OpenAiError::UnparsableResponseCode)?;
-            if res_code != "200" {
-                return Err(OpenAiError::ResponseCodeNotOk);
-            }
-
-            if response_string.ends_with("}\n") {
+            if text.is_empty() {
                 break;
             }
+
+            response_string += &text;
         }
 
+        let res_code = response_string
+            .split('\n')
+            .next()
+            .ok_or(OpenAiError::UnparsableResponseCode)?
+            .split(' ')
+            .nth(1)
+            .ok_or(OpenAiError::UnparsableResponseCode)?;
+        if res_code != "200" {
+            return Err(OpenAiError::ResponseCodeNotOk);
+        }
+
+        // psp::dprintln!("Response: |||{}|||", response_string);
+
         // find for double newline, get the body
-        let res_body =
+        let mut res_body =
             response_string
                 .split("\n\n")
                 .nth(1)
@@ -149,7 +160,16 @@ impl OpenAi {
                     "Body not found".to_owned(),
                 ))?;
 
-        let completion_response: CompletionResponse = serde_json_core::from_str(res_body)
+        // trim the body (lately some weird characters get added around)
+        if let Some(res) = BODY_REGEX.find(res_body) {
+            res_body = res.as_str();
+        } else {
+            return Err(OpenAiError::UnparsableResponseBody(
+                "Malformed body".to_owned(),
+            ));
+        }
+
+        let completion_response: CompletionResponse = serde_json_core::from_str(&res_body)
             .map_err(|e| OpenAiError::UnparsableResponseBody(e.to_string()))?
             .0;
 
