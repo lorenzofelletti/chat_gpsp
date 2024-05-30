@@ -107,6 +107,7 @@ impl Display for ChatHistory {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(unused)]
 pub struct Usage {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
@@ -114,12 +115,14 @@ pub struct Usage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(unused)]
 pub struct ResponseMessage {
     pub role: heapless::String<32>,
     pub content: heapless::String<1024>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(unused)]
 /// # Note
 /// This struct does not support the [`Self::logprobs`] field different from `None` yet.
 pub struct CompletionChoice {
@@ -134,6 +137,7 @@ pub struct CompletionChoice {
 pub struct LogprobResult {}
 
 #[derive(Debug, Deserialize)]
+#[allow(unused)]
 /// Completion response from OpenAI.
 pub struct CompletionResponse<'a> {
     pub id: &'a str,

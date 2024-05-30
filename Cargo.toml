@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-psp = { version = "0.3.7" }
-psp-net = { version = "0.1.1", default-features = false }
+psp = { version = "0.3.9" }
+psp-net = { version = "0.2.0", default-features = false }
 heapless = { version = "0.8", features = ["serde"] }
 regex = { version = "1.10", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }

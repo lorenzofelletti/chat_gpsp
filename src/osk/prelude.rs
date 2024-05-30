@@ -65,7 +65,7 @@ pub fn default_osk_params(data: &mut SceUtilityOskData) -> SceUtilityOskParams {
         },
         datacount: 1,
         data,
-        state: sys::SceUtilityOskState::None,
+        state: sys::PspUtilityDialogState::None,
         unk_60: 0,
     }
 }
