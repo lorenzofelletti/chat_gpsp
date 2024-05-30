@@ -7,8 +7,9 @@ use alloc::{
 use psp_net::{
     constants::HTTPS_PORT,
     socket::{tcp::TcpSocket, tls::TlsSocket},
-    traits::dns::ResolveHostname,
-    SocketAddr, TlsError,
+    traits::{dns::ResolveHostname, io::Open},
+    types::{SocketOptions, TlsSocketOptions},
+    Read, SocketAddr, TlsError, Write,
 };
 
 use crate::openai::types::CompletionResponse;
@@ -164,9 +165,9 @@ impl OpenAi {
         record_write_buf: &'b mut [u8],
         remote: SocketAddr,
     ) -> Result<TlsSocket<'b>, OpenAiError> {
-        let mut socket = TcpSocket::open().map_err(|_| OpenAiError::CannotOpenSocket)?;
+        let mut socket = TcpSocket::new().map_err(|_| OpenAiError::CannotOpenSocket)?;
         socket
-            .connect(remote)
+            .open(SocketOptions { remote })
             .map_err(|_| OpenAiError::CannotConnect)?;
 
         let mut tls_socket = TlsSocket::new(
@@ -178,7 +179,9 @@ impl OpenAi {
         );
 
         tls_socket
-            .open(Self::generate_seed())
+            .open(TlsSocketOptions {
+                seed: Self::generate_seed(),
+            })
             .map_err(|e| OpenAiError::TlsError(format!("{:?}", e)))?;
         Ok(tls_socket)
     }
