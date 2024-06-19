@@ -187,21 +187,16 @@ impl OpenAi {
     ) -> Result<TlsSocket<'b>, OpenAiError> {
         let mut socket = TcpSocket::new().map_err(|_| OpenAiError::CannotOpenSocket)?;
         socket
-            .open(SocketOptions { remote })
+            .open(&SocketOptions::new(remote))
             .map_err(|_| OpenAiError::CannotConnect)?;
 
-        let mut tls_socket = TlsSocket::new(
-            socket,
-            record_read_buf,
-            record_write_buf,
-            OPENAI_API_HOST,
-            None,
-        );
+        let mut tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf);
 
         tls_socket
-            .open(TlsSocketOptions {
-                seed: Self::generate_seed(),
-            })
+            .open(&TlsSocketOptions::new(
+                Self::generate_seed(),
+                OPENAI_API_HOST.to_owned(),
+            ))
             .map_err(|e| OpenAiError::TlsError(format!("{:?}", e)))?;
         Ok(tls_socket)
     }
