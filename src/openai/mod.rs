@@ -5,12 +5,11 @@ use alloc::{
 };
 
 use lazy_static::lazy_static;
+use psp_net::socket::{error::*, tcp::TcpSocket, tls::TlsSocket, SocketAddr};
 use psp_net::{
     constants::HTTPS_PORT,
-    socket::{tcp::TcpSocket, tls::TlsSocket},
-    traits::{dns::ResolveHostname, io::Open},
-    types::{SocketOptions, TlsSocketOptions},
-    Read, SocketAddr, TlsError, Write,
+    traits::{dns::ResolveHostname, io::Open, io::Read, io::Write},
+    types::{SocketOptions, SocketRecvFlags, TlsSocketOptions},
 };
 use regex::{Regex, RegexBuilder};
 
@@ -75,18 +74,20 @@ impl OpenAiContext {
     }
 }
 
-pub struct OpenAi {
+pub struct OpenAi<'a> {
     remote: SocketAddr,
     api_key: String,
     history: ChatHistory,
+    tls_socket_options: TlsSocketOptions<'a>,
 }
 
-impl OpenAi {
+impl<'a> OpenAi<'a> {
     pub fn new(openai_context: &OpenAiContext) -> Result<Self, OpenAiError> {
         Ok(OpenAi {
             remote: openai_context.remote(),
             api_key: openai_context.api_key(),
             history: ChatHistory::new_gpt3(0.7),
+            tls_socket_options: Self::create_tls_socket_options(),
         })
     }
 
@@ -103,7 +104,12 @@ impl OpenAi {
         let mut write_buf = Self::create_new_buf();
 
         // get tls socket
-        let mut tls_socket = Self::open_tls_socket(&mut read_buf, &mut write_buf, self.remote)?;
+        let mut tls_socket = Self::open_tls_socket(
+            &mut read_buf,
+            &mut write_buf,
+            self.remote,
+            &self.tls_socket_options,
+        )?;
 
         let request = format!(
             "POST {} HTTP/1.1\nHost: {}\nAuthorization: Bearer {}\nContent-Type: application/json\nContent-Length: {}\nUser-Agent: Sony PSP\n\n{}\n",
@@ -149,8 +155,6 @@ impl OpenAi {
             return Err(OpenAiError::ResponseCodeNotOk);
         }
 
-        // psp::dprintln!("Response: |||{}|||", response_string);
-
         // find for double newline, get the body
         let mut res_body =
             response_string
@@ -184,19 +188,18 @@ impl OpenAi {
         record_read_buf: &'b mut [u8],
         record_write_buf: &'b mut [u8],
         remote: SocketAddr,
+        tls_socket_options: &'b TlsSocketOptions<'b>,
     ) -> Result<TlsSocket<'b>, OpenAiError> {
         let mut socket = TcpSocket::new().map_err(|_| OpenAiError::CannotOpenSocket)?;
-        socket
+        socket = socket
             .open(&SocketOptions::new(remote))
             .map_err(|_| OpenAiError::CannotConnect)?;
+        // enable peeking (useful for TLS messages)
+        socket.set_recv_flags(SocketRecvFlags::MSG_PEEK);
 
         let mut tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf);
-
-        tls_socket
-            .open(&TlsSocketOptions::new(
-                Self::generate_seed(),
-                OPENAI_API_HOST.to_owned(),
-            ))
+        tls_socket = tls_socket
+            .open(&tls_socket_options)
             .map_err(|e| OpenAiError::TlsError(format!("{:?}", e)))?;
         Ok(tls_socket)
     }
@@ -211,5 +214,9 @@ impl OpenAi {
             psp::sys::sceRtcGetCurrentTick(&mut seed);
         }
         seed
+    }
+
+    fn create_tls_socket_options() -> TlsSocketOptions<'static> {
+        TlsSocketOptions::new(Self::generate_seed(), OPENAI_API_HOST.to_owned())
     }
 }

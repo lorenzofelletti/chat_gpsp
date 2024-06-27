@@ -8,4 +8,4 @@ pub const CHAT_MAX_LENGTH_USIZE: usize = CHAT_MAX_LENGTH as usize;
 #[allow(unused)]
 pub const MAX_MESSAGES_IN_A_REQUEST: usize = 10;
 
-pub const MAX_RETRIES: usize = 3;
+pub const MAX_RETRIES: usize = 1;

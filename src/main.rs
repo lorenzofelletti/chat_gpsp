@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 use openai::{OpenAi, OpenAiContext};
 use osk::{
     prelude::{default_osk_data, default_osk_params},
@@ -38,13 +38,27 @@ const OPENAI_API_KEY: &str = core::env!("OPENAI_API_KEY");
 
 #[no_mangle]
 fn psp_main() {
+    fn err_and_exit_game(e: &str) {
+        psp::dprintln!("Error: {:?}.\n\nExiting game...", e);
+        unsafe {
+            sceKernelExitGame();
+        }
+    }
+
     psp::enable_home_button();
 
     unsafe {
         // setup network
-        psp_net::utils::load_net_modules();
+        let res = psp_net::utils::load_net_modules();
+        if let Err(e) = res {
+            err_and_exit_game(format!("Failed to load network modules: {:?}", e).as_str());
+        }
         psp::dprintln!("Initializing network...");
-        psp_net::utils::net_init();
+        let res = psp_net::utils::net_init();
+        if let Err(e) = res {
+            err_and_exit_game(format!("Failed to initialize network: {:?}", e).as_str());
+            return;
+        }
 
         psp::sys::sceNetApctlConnect(1);
         loop {
