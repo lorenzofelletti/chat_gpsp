@@ -5,7 +5,7 @@ use alloc::{
 };
 
 use lazy_static::lazy_static;
-use psp_net::socket::{error::*, tcp::TcpSocket, tls::TlsSocket, SocketAddr};
+use psp_net::socket::{error::*, state::Ready, tcp::TcpSocket, tls::TlsSocket, SocketAddr};
 use psp_net::{
     constants::HTTPS_PORT,
     traits::{dns::ResolveHostname, io::Open, io::Read, io::Write},
@@ -189,16 +189,16 @@ impl<'a> OpenAi<'a> {
         record_write_buf: &'b mut [u8],
         remote: SocketAddr,
         tls_socket_options: &'b TlsSocketOptions<'b>,
-    ) -> Result<TlsSocket<'b>, OpenAiError> {
-        let mut socket = TcpSocket::new().map_err(|_| OpenAiError::CannotOpenSocket)?;
-        socket = socket
+    ) -> Result<TlsSocket<'b, Ready>, OpenAiError> {
+        let socket = TcpSocket::new().map_err(|_| OpenAiError::CannotOpenSocket)?;
+        let mut socket = socket
             .open(&SocketOptions::new(remote))
             .map_err(|_| OpenAiError::CannotConnect)?;
         // enable peeking (useful for TLS messages)
         socket.set_recv_flags(SocketRecvFlags::MSG_PEEK);
 
-        let mut tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf);
-        tls_socket = tls_socket
+        let tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf);
+        let tls_socket = tls_socket
             .open(&tls_socket_options)
             .map_err(|e| OpenAiError::TlsError(format!("{:?}", e)))?;
         Ok(tls_socket)

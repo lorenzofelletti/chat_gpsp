@@ -562,9 +562,9 @@ dependencies = [
 
 [[package]]
 name = "psp-net"
-version = "0.5.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f75b40aa7c2f7b1dbed20a7c9559093ba9e37c4fbbe2a2cbd0546993eec0137"
+checksum = "e9c60760f3c040efbd8318a314179a6caeadccb75d434c4e4022850312e0e4f8"
 dependencies = [
  "bitflags",
  "dns-protocol",
