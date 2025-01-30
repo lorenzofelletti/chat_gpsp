@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(c_void_variant)]
+#![feature(slice_pattern)]
 
 extern crate alloc;
 

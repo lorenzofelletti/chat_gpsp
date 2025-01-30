@@ -2,14 +2,20 @@ use alloc::{
     borrow::ToOwned,
     format,
     string::{String, ToString},
+    vec::Vec,
 };
 
 use lazy_static::lazy_static;
-use psp_net::socket::{error::*, state::Ready, tcp::TcpSocket, tls::TlsSocket, SocketAddr};
 use psp_net::{
     constants::HTTPS_PORT,
-    traits::{dns::ResolveHostname, io::Open, io::Read, io::Write},
-    types::{SocketOptions, SocketRecvFlags, TlsSocketOptions},
+    http::types::{Authorization, ContentType},
+    parse_response, request,
+    traits::dns::ResolveHostname,
+    types::SocketRecvFlags,
+};
+use psp_net::{
+    socket::{error::*, SocketAddr},
+    tls_socket,
 };
 use regex::{Regex, RegexBuilder};
 
@@ -30,13 +36,26 @@ lazy_static! {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenAiError {
-    CannotOpenSocket,
+    // CannotOpenSocket,
     CannotResolveHost,
-    CannotConnect,
+    // CannotConnect,
     TlsError(String),
-    UnparsableResponseCode,
+    UnparsableResponseCode(String),
     UnparsableResponseBody(String),
+    PartialResponse(String),
     ResponseCodeNotOk,
+}
+
+impl OpenAiError {
+    pub fn new_unparsable_response_code(msg: String) -> Self {
+        OpenAiError::UnparsableResponseCode(msg)
+    }
+    pub fn new_empty_unparsable_response_code() -> Self {
+        OpenAiError::UnparsableResponseCode(String::new())
+    }
+    pub fn new_empty_partial_response() -> Self {
+        OpenAiError::PartialResponse(String::new())
+    }
 }
 
 pub struct OpenAiContext {
@@ -74,20 +93,18 @@ impl OpenAiContext {
     }
 }
 
-pub struct OpenAi<'a> {
+pub struct OpenAi {
     remote: SocketAddr,
     api_key: String,
     history: ChatHistory,
-    tls_socket_options: TlsSocketOptions<'a>,
 }
 
-impl<'a> OpenAi<'a> {
+impl OpenAi {
     pub fn new(openai_context: &OpenAiContext) -> Result<Self, OpenAiError> {
         Ok(OpenAi {
             remote: openai_context.remote(),
             api_key: openai_context.api_key(),
             history: ChatHistory::new_gpt3(0.7),
-            tls_socket_options: Self::create_tls_socket_options(),
         })
     }
 
@@ -98,60 +115,33 @@ impl<'a> OpenAi<'a> {
 
         self.history.add_user_message(prompt.to_owned());
 
-        let (request_body, content_length) = self.history.to_string_with_content_length();
+        tls_socket! {
+            name: _try_socket,
+            host OPENAI_API_HOST => &self.ip(),
+            recv_flags SocketRecvFlags::MSG_PEEK,
+        };
 
-        let mut read_buf = Self::create_new_buf();
-        let mut write_buf = Self::create_new_buf();
+        let mut socket = match _try_socket {
+            Ok(socket) => socket,
+            Err(e) => return Err(OpenAiError::TlsError(format!("{:?}", e))),
+        };
 
-        // get tls socket
-        let mut tls_socket = Self::open_tls_socket(
-            &mut read_buf,
-            &mut write_buf,
-            self.remote,
-            &self.tls_socket_options,
-        )?;
+        let auth = Authorization::Bearer(self.api_key.clone());
 
-        let request = format!(
-            "POST {} HTTP/1.1\nHost: {}\nAuthorization: Bearer {}\nContent-Type: application/json\nContent-Length: {}\nUser-Agent: Sony PSP\n\n{}\n",
-            POST_PATH,
-            OPENAI_API_HOST,
-            self.api_key,
-            content_length,
-            request_body,
-        );
-        let request_bytes = request.as_bytes();
-
-        let mut response_string = String::new();
-
-        tls_socket
-            .write_all(request_bytes)
-            .map_err(|e| log_error(&e))?;
-
-        tls_socket.flush().map_err(|e| log_error(&e))?;
-
-        for _ in 1..=MAX_RETRIES {
-            let response_buf = &mut [0u8; 16_384];
-            tls_socket.read(response_buf).map_err(|e| log_error(&e))?;
-
-            let text = String::from_utf8_lossy(response_buf)
-                .to_string()
-                .replace(['\r', '\0'], "");
-
-            if text.is_empty() {
-                break;
-            }
-
-            response_string += &text;
+        let request = request! {
+            OPENAI_API_HOST post POST_PATH ContentType::ApplicationJson,
+            authorization auth,
+            body Vec::new(),
+            "User-Agent" => "Sony PSP";
         }
+        .render();
 
-        let res_code = response_string
-            .split('\n')
-            .next()
-            .ok_or(OpenAiError::UnparsableResponseCode)?
-            .split(' ')
-            .nth(1)
-            .ok_or(OpenAiError::UnparsableResponseCode)?;
-        if res_code != "200" {
+        psp_net::write!(request => socket).map_err(|e| log_error(&e))?;
+
+        let response_string = psp_net::read!(string from socket).map_err(|e| log_error(&e))?;
+
+        let res_code = parse_res_code(&response_string)?;
+        if res_code != 200 {
             return Err(OpenAiError::ResponseCodeNotOk);
         }
 
@@ -164,7 +154,6 @@ impl<'a> OpenAi<'a> {
                     "Body not found".to_owned(),
                 ))?;
 
-        // trim the body (lately some weird characters get added around)
         if let Some(res) = BODY_REGEX.find(res_body) {
             res_body = res.as_str();
         } else {
@@ -184,39 +173,21 @@ impl<'a> OpenAi<'a> {
         Ok(assistant_message.to_owned())
     }
 
-    fn open_tls_socket<'b>(
-        record_read_buf: &'b mut [u8],
-        record_write_buf: &'b mut [u8],
-        remote: SocketAddr,
-        tls_socket_options: &'b TlsSocketOptions<'b>,
-    ) -> Result<TlsSocket<'b, Ready>, OpenAiError> {
-        let socket = TcpSocket::new().map_err(|_| OpenAiError::CannotOpenSocket)?;
-        let mut socket = socket
-            .open(&SocketOptions::new(remote))
-            .map_err(|_| OpenAiError::CannotConnect)?;
-        // enable peeking (useful for TLS messages)
-        socket.set_recv_flags(SocketRecvFlags::MSG_PEEK);
-
-        let tls_socket = TlsSocket::new(socket, record_read_buf, record_write_buf);
-        let tls_socket = tls_socket
-            .open(&tls_socket_options)
-            .map_err(|e| OpenAiError::TlsError(format!("{:?}", e)))?;
-        Ok(tls_socket)
+    fn ip(&self) -> String {
+        self.remote.ip().to_string()
     }
+}
 
-    pub fn create_new_buf() -> [u8; 16_384] {
-        [0; 16_384]
+fn parse_res_code(response_string: &String) -> Result<usize, OpenAiError> {
+    let parsed = parse_response!(response_string,);
+    if parsed.is_err() {
+        return Err(OpenAiError::UnparsableResponseCode(
+            parsed.unwrap_err().to_string(),
+        ));
     }
-
-    pub fn generate_seed() -> u64 {
-        let mut seed = 0;
-        unsafe {
-            psp::sys::sceRtcGetCurrentTick(&mut seed);
-        }
-        seed
+    let parsed = parsed.unwrap();
+    if parsed.is_partial() {
+        return Err(OpenAiError::new_empty_partial_response());
     }
-
-    fn create_tls_socket_options() -> TlsSocketOptions<'static> {
-        TlsSocketOptions::new(Self::generate_seed(), OPENAI_API_HOST.to_owned())
-    }
+    Ok(parsed.unwrap())
 }
