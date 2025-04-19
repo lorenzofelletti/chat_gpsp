@@ -13,6 +13,7 @@ use psp_net::{
     traits::dns::ResolveHostname,
     types::SocketRecvFlags,
 };
+
 use psp_net::{
     socket::{error::*, SocketAddr},
     tls_socket,
@@ -47,12 +48,6 @@ pub enum OpenAiError {
 }
 
 impl OpenAiError {
-    pub fn new_unparsable_response_code(msg: String) -> Self {
-        OpenAiError::UnparsableResponseCode(msg)
-    }
-    pub fn new_empty_unparsable_response_code() -> Self {
-        OpenAiError::UnparsableResponseCode(String::new())
-    }
     pub fn new_empty_partial_response() -> Self {
         OpenAiError::PartialResponse(String::new())
     }
@@ -116,12 +111,12 @@ impl OpenAi {
         self.history.add_user_message(prompt.to_owned());
 
         tls_socket! {
-            name: _try_socket,
+            result: _maybe_socket,
             host OPENAI_API_HOST => &self.ip(),
             recv_flags SocketRecvFlags::MSG_PEEK,
         };
 
-        let mut socket = match _try_socket {
+        let mut socket = match _maybe_socket {
             Ok(socket) => socket,
             Err(e) => return Err(OpenAiError::TlsError(format!("{:?}", e))),
         };

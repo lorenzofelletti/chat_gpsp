@@ -6,9 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-psp = { version = "0.3.10" }
-#psp-net = { git = "https://github.com/lorenzofelletti/psp-net", rev = "4ddf52c045f2a4e4940df297533e7fc715691bdc", features = [
-psp-net = { version = "0.6.3", features = [
+psp = { version = "0.3.12" }
+psp-net = { version = "0.6.6", features = [
     "http",
     "macros",
 ] }
@@ -20,7 +19,7 @@ nb = "1"
 lazy_static = { version = "1.5", default-features = false, features = [
     "spin_no_std",
 ] }
-httparse = { version = "1.9.5", default-features = false }
+httparse = { version = "1.10.1", default-features = false }
 
 [profile.release]
 lto = true
