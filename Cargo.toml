@@ -6,16 +6,20 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-psp = { version = "0.3.10" }
-psp-net = { version = "0.6.0", default-features = false }
+psp = { version = "0.3.12" }
+psp-net = { version = "0.6.6", features = [
+    "http",
+    "macros",
+] }
 heapless = { version = "0.8", features = ["serde"] }
-regex = { version = "1.10", default-features = false }
+regex = { version = "1.11", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde-json-core = "0.6"
 nb = "1"
 lazy_static = { version = "1.5", default-features = false, features = [
     "spin_no_std",
 ] }
+httparse = { version = "1.10.1", default-features = false }
 
 [profile.release]
 lto = true
